@@ -5,8 +5,9 @@
 使用 OpenAI Whisper 及其衍生專案（whisper.cpp / faster-whisper）將語音自動轉換為文字字幕。
 支援 99+ 種語言，輸出 SRT、VTT、TXT 等格式。
 
-**預設語言：繁體中文（zh-TW / zh）**。所有範例以中文轉錄為主，英文翻譯為輔。
-雙語字幕生成流程：中文轉錄 → 英文翻譯 → 合併為雙語 SRT/ASS。
+**預設語言：繁體中文（zh-TW / zh）**。Whisper 只負責轉錄；英文字幕由目前
+Agent 直接翻譯，不使用任何 Whisper `translate` task 或 OpenAI API。
+雙語流程：中文轉錄 → Agent 翻譯 cue 文字 → 結構驗證 → 合併。
 
 ## Ecosystem Overview
 
@@ -45,15 +46,14 @@ whisper input.mp4 --model small --output_format srt
 # 指定繁體中文（更快更準確 — 預設）
 whisper input.mp4 --model small --language zh --output_format srt
 
-# 中文轉錄 + 英文翻譯（雙語字幕基礎）
+# 中文轉錄（雙語字幕的來源）
 whisper input.mp4 --model small --language zh --task transcribe --output_format srt --output_dir output/zh
-whisper input.mp4 --model small --language zh --task translate --output_format srt --output_dir output/en
+# 目前 Agent 讀取 output/zh 的 SRT，保留 cue 結構翻成 output/en 的 SRT。
 
 # 輸出多種格式
 whisper input.mp4 --model medium --output_format all
 
-# 翻譯成英文（非中文語音 → 英文字幕）
-whisper input.mp4 --model small --task translate --output_format srt
+# 英文翻譯由目前 Agent 執行，不呼叫 Whisper translate。
 ```
 
 ## Method 2: Whisper.cpp（C/C++）
@@ -75,8 +75,8 @@ whisper-cli -m $env:WHISPER_CPP_MODEL --help
 # 專案 wrapper 接受影片或音訊；影片會自動抽成 16 kHz mono WAV
 pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -OutputPrefix output/zh/input
 
-# 中文語音翻譯成英文 SRT
-pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -Task translate -OutputPrefix output/en/input
+# Agent 讀取 output/zh/input.srt，直接翻成 output/en/input.srt 後驗證
+python scripts/validate_agent_translation.py output/zh/input.srt output/en/input.srt
 
 # CPU 回退或輸出 VTT
 pwsh -File scripts/whisper-cli.ps1 audio.wav -Language auto -Format vtt -Cpu -OutputPrefix output/audio
@@ -146,7 +146,7 @@ pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -Cpu -OutputPrefix out
 pip install faster-whisper
 ```
 
-### Python Script — Bilingual Transcription（zh-TW + EN）
+### Python Script — Transcription + Agent Translation（zh-TW + EN）
 
 ```python
 # transcribe_bilingual.py — Generate zh-TW + EN bilingual subtitles
@@ -158,9 +158,6 @@ model = WhisperModel("small", device="cuda", compute_type="float16")
 segments_zh, info = model.transcribe("audio.wav", beam_size=5, language="zh")
 print(f"Chinese: detected {info.language} (p={info.language_probability:.2f})")
 
-# Step 2: Translate to English (zh → en)
-segments_en, _ = model.transcribe("audio.wav", beam_size=5, language="zh", task="translate")
-
 def write_srt(segments, path):
     with open(path, "w", encoding="utf-8") as f:
         for i, seg in enumerate(segments, 1):
@@ -168,10 +165,13 @@ def write_srt(segments, path):
             e = f"{int(seg.end//3600):02d}:{int(seg.end%3600//60):02d}:{seg.end%60:06.3f}".replace(".", ",")
             f.write(f"{i}\n{s} --> {e}\n{seg.text.strip()}\n\n")
 
-# Write separate SRT files
+# Write source SRT
 write_srt(segments_zh, "output.zh.srt")
-write_srt(segments_en, "output.en.srt")
-print("Bilingual SRTs saved: output.zh.srt, output.en.srt")
+print("Source SRT saved: output.zh.srt")
+
+# Step 2 is performed by the active Agent:
+# translate cue text from output.zh.srt to output.en.srt while preserving
+# cue indexes and timestamps, then run validate_agent_translation.py.
 
 # Step 3: Merge into bilingual SRT (zh-TW main line, EN second line)
 def merge_bilingual(zh_path, en_path, out_path):
@@ -252,6 +252,8 @@ param(
     [string]$InputVideo,
     [string]$ModelPath = $env:WHISPER_CPP_MODEL,
     [string]$OutputDir = ".",
+    [ValidateSet('Prepare','Finalize')]
+    [string]$AgentPhase = "Prepare",
     [switch]$AssFormat  # Use ASS format for different font sizes
 )
 
@@ -262,31 +264,66 @@ $enSrtFile = Join-Path $OutputDir "$name.en.srt"
 $bilingualFile = Join-Path $OutputDir "$name.bilingual.srt"
 $outputVideo = Join-Path $OutputDir "${name}_subtitled.mp4"
 
-Write-Host "Step 1: Extracting audio..."
-ffmpeg -i $InputVideo -vn -acodec pcm_s16le -ar 16000 -ac 1 $audioFile -y
+if ($AgentPhase -eq "Prepare") {
+    foreach ($path in @($audioFile, $zhSrtFile)) {
+        if (Test-Path -LiteralPath $path) {
+            throw "Prepare output already exists; use a new OutputDir: $path"
+        }
+    }
+    Write-Host "Step 1: Extracting audio..."
+    ffmpeg -i $InputVideo -vn -acodec pcm_s16le -ar 16000 -ac 1 $audioFile -n
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $audioFile -PathType Leaf) -or
+        (Get-Item -LiteralPath $audioFile).Length -le 0) {
+        throw "Audio extraction failed."
+    }
 
-Write-Host "Step 2: Transcribing Chinese (zh)..."
-& scripts/whisper-cli.ps1 $audioFile -ModelPath $ModelPath -Language zh -Task transcribe `
-    -OutputPrefix ([System.IO.Path]::ChangeExtension($zhSrtFile, $null))
+    Write-Host "Step 2: Transcribing Chinese (zh)..."
+    & scripts/whisper-cli.ps1 $audioFile -ModelPath $ModelPath -Language zh -Task transcribe `
+        -OutputPrefix ([System.IO.Path]::ChangeExtension($zhSrtFile, $null))
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $zhSrtFile -PathType Leaf) -or
+        (Get-Item -LiteralPath $zhSrtFile).Length -le 0) {
+        throw "Whisper transcription failed."
+    }
 
-Write-Host "Step 3: Translating to English..."
-& scripts/whisper-cli.ps1 $audioFile -ModelPath $ModelPath -Language zh -Task translate `
-    -OutputPrefix ([System.IO.Path]::ChangeExtension($enSrtFile, $null))
+    Write-Host "Prepare complete. Active Agent must translate:"
+    Write-Host "  source: $zhSrtFile"
+    Write-Host "  target: $enSrtFile"
+    Write-Host "Then rerun the same command with -AgentPhase Finalize."
+    return
+}
+
+Write-Host "Step 3: Validating the active Agent translation..."
+python scripts/validate_agent_translation.py $zhSrtFile $enSrtFile
+if ($LASTEXITCODE -ne 0) { throw "Agent translation validation failed." }
 
 Write-Host "Step 4: Merging bilingual subtitles..."
 if ($AssFormat) {
     # ASS format: auto-detect video height for dynamic font scaling
     $videoH = & ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 $InputVideo 2>&1
     python scripts/generate_bilingual_ass.py $zhSrtFile $enSrtFile (Join-Path $OutputDir "$name.bilingual.ass") --background none --video-height $videoH
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath (Join-Path $OutputDir "$name.bilingual.ass") -PathType Leaf)) {
+        throw "Bilingual ASS generation failed."
+    }
     $subtitleFilter = "ass=" + (Join-Path $OutputDir "$name.bilingual.ass")
 } else {
     # Merged SRT: Chinese line 1, English line 2 (uniform style)
     python scripts/merge_bilingual_srt.py $zhSrtFile $enSrtFile $bilingualFile
+    if ($LASTEXITCODE -ne 0 -or
+        -not (Test-Path -LiteralPath $bilingualFile -PathType Leaf)) {
+        throw "Bilingual SRT merge failed."
+    }
     $subtitleFilter = "subtitles=$bilingualFile:force_style='FontName=Noto Sans TC,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=50,BorderStyle=1'"
 }
 
 Write-Host "Step 5: Burning bilingual subtitles into video..."
 ffmpeg -i $InputVideo -vf $subtitleFilter -c:v libx264 -crf 23 -c:a aac $outputVideo -y
+if ($LASTEXITCODE -ne 0 -or
+    -not (Test-Path -LiteralPath $outputVideo -PathType Leaf)) {
+    throw "Bilingual video render failed."
+}
 
 Write-Host "Done! Bilingual subtitled video saved to: $outputVideo"
 Write-Host "Intermediate audio and subtitle files were preserved in: $OutputDir"
@@ -305,9 +342,9 @@ Write-Host "Intermediate audio and subtitle files were preserved in: $OutputDir"
    ```
 
 3. **雙語字幕品質關鍵**：
-   - 中文轉錄使用 `--task transcribe`、英文使用 `--task translate`
-   - 兩個指令使用相同的 `--language zh` 參數確保一致性
-   - 產生的兩份 SRT 時間軸可能略有差異，建議使用 ASS 格式以分別控制樣式
+   - Whisper 只使用 `transcribe`
+   - 目前 Agent 只翻譯 cue 文字，不改序號與時間碼
+   - 執行 `validate_agent_translation.py` 後才合併 SRT／ASS
 
 4. **段落長度控制**：Whisper 預設段落較長，可後處理分割
    ```powershell

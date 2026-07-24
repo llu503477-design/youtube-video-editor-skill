@@ -1,5 +1,17 @@
 # CHANGE_LOG — YouTube Video Editor Skill
 
+## 2026-07-24 — Qwen Narration with Whisper and Agent Translation
+
+### Added
+- **scripts/qwen-narration-pipeline.ps1** — Transactional qwentts.cpp narration and whisper.cpp reverse transcription with explicit voice-rights confirmation
+- **scripts/validate_agent_translation.py** — Verifies that Agent-translated English SRT preserves cue count, indexes, and timestamps
+- **tests/test_skill_scripts.py** — Covers stage order, fail-closed publication, Agent-translation validation, rights confirmation, and overwrite protection
+
+### Changed
+- **SKILL.md / README.md / agents/openai.yaml** — Route narration through Qwen, Whisper-only transcription, and direct Agent translation without OpenAI API
+- **ai-subtitles/narration.md / qwentts-voice-cloning.md** — Document the Agent translation contract, validation limits, and legacy Edge-TTS fallback
+- **workflows/** — Full and batch examples now require a narration script, authorized reference voice, reverse ASR, and Agent-translated English SRT
+
 ## 2026-07-24 — Auto-Editor 31 Redesign
 
 ### Added

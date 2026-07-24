@@ -110,16 +110,15 @@ ffmpeg -i video.mp4 -i bgm.mp3 `
 
 ## Bilingual Pipeline (zh-TW + EN)
 
-若需雙語字幕（FFmpeg 8.0+ 需搭配 Python 額外處理英文翻譯）：
+若需雙語字幕，FFmpeg／Whisper 先產生中文 SRT，再由目前 Agent 直接翻譯：
 
 ```powershell
 # Step 1: 中文轉錄
 ffmpeg -i input.mp4 -af "whisper=model=ggml-medium.bin:language=zh:format=srt" -f null -
 # 產生 input.srt（中文）
 
-# Step 2: 提取音訊 + 使用 Python Whisper 產生英文翻譯
-ffmpeg -i input.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav
-pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task translate -OutputPrefix output/en/audio
+# Step 2: Agent 讀取 input.srt，只翻譯 cue 文字到 output/en/audio.srt
+python scripts/validate_agent_translation.py input.srt output/en/audio.srt
 
 # Step 3: 合併雙語字幕（使用 ASS 格式支援不同字級）
 python scripts/generate_bilingual_ass.py input.srt audio.srt bilingual.ass
@@ -153,5 +152,5 @@ ffmpeg -i input.mp4 -vf "ass=bilingual.ass" -c:v libx264 -crf 23 -c:a aac output
 1. **指定語言**：強烈建議手動指定 `language=zh` 以提升繁體中文準確度
 2. **VAD 開啟**：預設啟用 VAD，可減少無語音段落的雜訊文字
 3. **中型模型為佳**：medium 模型在速度/準確度間取得最佳平衡
-4. **雙語限制**：FFmpeg 8.0 Whisper filter 不支援翻譯（`task=translate`），英文翻譯需使用 Python Whisper
+4. **雙語限制**：Whisper 只做辨識；英文由目前 Agent 直接翻譯，不使用 API
 5. **檢查輸出**：轉錄後務必抽查 SRT 內容的正確性，特別是中文繁體字元

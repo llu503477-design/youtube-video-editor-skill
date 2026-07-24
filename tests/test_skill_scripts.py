@@ -269,6 +269,97 @@ Set-Content -LiteralPath ($Rest[$outputIndex + 1] + ".srt") -Value $Rest[$langua
             self.assertNotEqual(second.returncode, 0)
             self.assertIn("Output already exists", second.stdout + second.stderr)
 
+            translate = subprocess.run(
+                command + ["-Task", "translate"],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+            )
+            self.assertNotEqual(translate.returncode, 0)
+            self.assertIn(
+                "translation is disabled",
+                translate.stdout + translate.stderr,
+            )
+
+            bypass = subprocess.run(
+                command + ["-Force", "--translate"],
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+            )
+            self.assertNotEqual(bypass.returncode, 0)
+            self.assertIn(
+                "translation flags are disabled",
+                bypass.stdout + bypass.stderr,
+            )
+
+            failing_cli = work / "failing-whisper-cli.ps1"
+            failing_cli.write_text("exit 7", encoding="utf-8")
+            existing_output = output_prefix.with_suffix(".srt")
+            existing_output.write_text("keep-old-output", encoding="utf-8")
+            failing_command = [
+                self.shell,
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                str(SCRIPTS / "whisper-cli.ps1"),
+                str(audio),
+                "-WhisperCliPath",
+                str(failing_cli),
+                "-ModelPath",
+                str(model),
+                "-Language",
+                "zh",
+                "-OutputPrefix",
+                str(output_prefix),
+                "-Force",
+            ]
+            failed_force = subprocess.run(
+                failing_command,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+            )
+            self.assertNotEqual(failed_force.returncode, 0)
+            self.assertEqual(
+                existing_output.read_text(encoding="utf-8"),
+                "keep-old-output",
+            )
+
+            directory_output = work / "directory-output"
+            directory_output.mkdir()
+            directory_command = [
+                self.shell,
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                str(SCRIPTS / "whisper-cli.ps1"),
+                str(audio),
+                "-WhisperCliPath",
+                str(fake_cli),
+                "-ModelPath",
+                str(model),
+                "-OutputPrefix",
+                str(directory_output.with_suffix("")),
+                "-Force",
+            ]
+            directory_output.with_suffix(".srt").mkdir()
+            rejected_directory = subprocess.run(
+                directory_command,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+            )
+            self.assertNotEqual(rejected_directory.returncode, 0)
+            self.assertIn(
+                "must be a file, not a directory",
+                rejected_directory.stdout + rejected_directory.stderr,
+            )
+
 
 class QwenVoiceCloneWrapperTests(unittest.TestCase):
     def setUp(self):
@@ -327,6 +418,313 @@ class QwenVoiceCloneWrapperTests(unittest.TestCase):
             self.assertNotEqual(blocked.returncode, 0)
             self.assertIn("Output already exists", blocked.stdout + blocked.stderr)
             self.assertEqual(output.read_bytes(), b"keep")
+
+
+class QwenNarrationPipelineTests(unittest.TestCase):
+    def setUp(self):
+        self.shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not self.shell:
+            self.skipTest("PowerShell is required")
+
+    def run_pipeline(self, *arguments, env=None):
+        return subprocess.run(
+            [
+                self.shell,
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                str(SCRIPTS / "qwen-narration-pipeline.ps1"),
+                *map(str, arguments),
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            env=env,
+        )
+
+    def make_fake_wrappers(self, work):
+        qwen = work / "fake-qwen.ps1"
+        whisper = work / "fake-whisper.ps1"
+        qwen.write_text(
+            """
+param(
+    [string]$Text,
+    [string]$TextFile,
+    [string]$ReferenceWav,
+    [string]$ReferenceText,
+    [string]$ReferenceTextFile,
+    [string]$OutputPath,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
+)
+Add-Content -LiteralPath $env:QWEN_NARRATION_TEST_LOG -Value "qwen|$OutputPath"
+Set-Content -LiteralPath $OutputPath -Value "RIFF-qwen"
+""".strip(),
+            encoding="utf-8",
+        )
+        whisper.write_text(
+            """
+param(
+    [Parameter(Position = 0)][string]$InputPath,
+    [string]$OutputPrefix,
+    [string]$Language,
+    [string]$Task,
+    [string]$Format,
+    [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
+)
+Add-Content -LiteralPath $env:QWEN_NARRATION_TEST_LOG -Value "$Task|$Language|$OutputPrefix.$Format"
+if ($env:QWEN_NARRATION_FAIL_TASK -eq $Task) { throw "forced $Task failure" }
+Set-Content -LiteralPath "$OutputPrefix.$Format" -Value "$Task result"
+""".strip(),
+            encoding="utf-8",
+        )
+        return qwen, whisper
+
+    def test_generates_audio_then_transcribes_for_agent_translation(self):
+        with tempfile.TemporaryDirectory(prefix="qwen_narration_pipeline_") as temp:
+            work = Path(temp)
+            reference = work / "reference.wav"
+            text_file = work / "narration.txt"
+            output = work / "narration.wav"
+            log = work / "pipeline.log"
+            reference.write_bytes(b"RIFF-reference")
+            text_file.write_text("這是一段測試旁白。", encoding="utf-8")
+            qwen, whisper = self.make_fake_wrappers(work)
+            env = os.environ.copy()
+            env["QWEN_NARRATION_TEST_LOG"] = str(log)
+
+            result = self.run_pipeline(
+                "-TextFile",
+                text_file,
+                "-ReferenceWav",
+                reference,
+                "-ReferenceText",
+                "參考聲音內容。",
+                "-OutputPath",
+                output,
+                "-WhisperLanguage",
+                "zh",
+                "-QwenWrapperPath",
+                qwen,
+                "-WhisperWrapperPath",
+                whisper,
+                "-ConfirmVoiceRights",
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            transcript = work / "narration.asr.srt"
+            self.assertTrue(output.is_file())
+            self.assertTrue(transcript.is_file())
+            calls = log.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(calls[0].split("|", 1)[0], "qwen")
+            self.assertEqual(calls[1].split("|", 1)[0], "transcribe")
+            self.assertEqual(len(calls), 2)
+            self.assertIn("|zh|", calls[1])
+            self.assertIn(
+                "translate the transcript with the active Agent",
+                result.stdout,
+            )
+
+    def test_fails_closed_when_transcription_fails(self):
+        with tempfile.TemporaryDirectory(prefix="qwen_narration_failure_") as temp:
+            work = Path(temp)
+            reference = work / "reference.wav"
+            output = work / "narration.wav"
+            log = work / "pipeline.log"
+            reference.write_bytes(b"RIFF-reference")
+            qwen, whisper = self.make_fake_wrappers(work)
+            env = os.environ.copy()
+            env["QWEN_NARRATION_TEST_LOG"] = str(log)
+            env["QWEN_NARRATION_FAIL_TASK"] = "transcribe"
+
+            result = self.run_pipeline(
+                "-Text",
+                "這是一段測試旁白。",
+                "-ReferenceWav",
+                reference,
+                "-ReferenceText",
+                "參考聲音內容。",
+                "-OutputPath",
+                output,
+                "-QwenWrapperPath",
+                qwen,
+                "-WhisperWrapperPath",
+                whisper,
+                "-ConfirmVoiceRights",
+                env=env,
+            )
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("forced transcribe failure", result.stdout + result.stderr)
+            self.assertFalse(output.exists())
+            self.assertFalse((work / "narration.asr.srt").exists())
+
+    def test_requires_voice_rights_and_refuses_existing_artifacts(self):
+        with tempfile.TemporaryDirectory(prefix="qwen_narration_safety_") as temp:
+            work = Path(temp)
+            reference = work / "reference.wav"
+            output = work / "narration.wav"
+            reference.write_bytes(b"RIFF-reference")
+            output.write_bytes(b"keep")
+            qwen, whisper = self.make_fake_wrappers(work)
+
+            no_rights = self.run_pipeline(
+                "-Text",
+                "旁白。",
+                "-ReferenceWav",
+                reference,
+                "-ReferenceText",
+                "參考。",
+                "-OutputPath",
+                work / "new.wav",
+                "-QwenWrapperPath",
+                qwen,
+                "-WhisperWrapperPath",
+                whisper,
+            )
+            self.assertNotEqual(no_rights.returncode, 0)
+            self.assertIn("ConfirmVoiceRights", no_rights.stdout + no_rights.stderr)
+
+            blocked = self.run_pipeline(
+                "-Text",
+                "旁白。",
+                "-ReferenceWav",
+                reference,
+                "-ReferenceText",
+                "參考。",
+                "-OutputPath",
+                output,
+                "-QwenWrapperPath",
+                qwen,
+                "-WhisperWrapperPath",
+                whisper,
+                "-ConfirmVoiceRights",
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("Output already exists", blocked.stdout + blocked.stderr)
+            self.assertEqual(output.read_bytes(), b"keep")
+
+
+class AgentTranslationValidationTests(unittest.TestCase):
+    def run_validator(self, source, translation):
+        return subprocess.run(
+            [
+                sys.executable,
+                str(SCRIPTS / "validate_agent_translation.py"),
+                str(source),
+                str(translation),
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+        )
+
+    def test_accepts_agent_translation_with_preserved_timing(self):
+        with tempfile.TemporaryDirectory(prefix="agent_translation_") as temp:
+            work = Path(temp)
+            source = work / "narration.asr.srt"
+            translation = work / "narration.en.srt"
+            source.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\n歡迎收看\n\n",
+                encoding="utf-8",
+            )
+            translation.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\nWelcome.\n\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_validator(source, translation)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("timestamps preserved", result.stdout)
+
+    def test_rejects_changed_timing_and_non_english_output(self):
+        with tempfile.TemporaryDirectory(prefix="agent_translation_invalid_") as temp:
+            work = Path(temp)
+            source = work / "narration.asr.srt"
+            translation = work / "narration.en.srt"
+            source.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\n歡迎收看\n\n",
+                encoding="utf-8",
+            )
+            translation.write_text(
+                "1\n00:00:00,100 --> 00:00:02,000\n這不是英文\n\n",
+                encoding="utf-8",
+            )
+
+            changed_timing = self.run_validator(source, translation)
+            self.assertNotEqual(changed_timing.returncode, 0)
+            self.assertIn("timestamp changed", changed_timing.stderr)
+
+            translation.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\n這不是英文\n\n",
+                encoding="utf-8",
+            )
+            non_english = self.run_validator(source, translation)
+            self.assertNotEqual(non_english.returncode, 0)
+            self.assertIn("not English-dominant", non_english.stderr)
+
+    def test_rejects_extra_markdown_or_malformed_blocks(self):
+        with tempfile.TemporaryDirectory(prefix="agent_translation_strict_") as temp:
+            work = Path(temp)
+            source = work / "narration.asr.srt"
+            translation = work / "narration.en.srt"
+            source.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\n歡迎收看\n\n",
+                encoding="utf-8",
+            )
+            translation.write_text(
+                "Here is the translation:\n\n"
+                "1\n00:00:00,000 --> 00:00:02,000\nWelcome.\n\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_validator(source, translation)
+
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("Invalid SRT block", result.stderr)
+
+    def test_accepts_english_with_latin_diacritics(self):
+        with tempfile.TemporaryDirectory(prefix="agent_translation_latin_") as temp:
+            work = Path(temp)
+            source = work / "narration.asr.srt"
+            translation = work / "narration.en.srt"
+            source.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\n咖啡\n\n",
+                encoding="utf-8",
+            )
+            translation.write_text(
+                "1\n00:00:00,000 --> 00:00:02,000\nCafé.\n\n",
+                encoding="utf-8",
+            )
+
+            result = self.run_validator(source, translation)
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class AgentTranslationWorkflowContractTests(unittest.TestCase):
+    def test_full_pipeline_is_agent_orchestrated_and_fails_closed(self):
+        workflow = (ROOT / "workflows" / "full-pipeline.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Agent 編排流程", workflow)
+        self.assertIn("validate_agent_translation.py $zhSrt $enSrt", workflow)
+        self.assertIn("if ($LASTEXITCODE -ne 0)", workflow)
+        self.assertNotIn("AgentPhase", workflow)
+        self.assertNotIn("agent-translation.json", workflow)
+
+    def test_batch_pipeline_fails_closed_and_tracks_ffmpeg_inputs(self):
+        workflow = (ROOT / "workflows" / "batch-processing.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("Agent 應在", workflow)
+        self.assertIn('-map 0:v -map "[aout]"', workflow)
+        self.assertIn("失敗檔計入", workflow)
+        self.assertNotIn("$buildArgs.Count - 2", workflow)
+        self.assertNotIn("AgentPhase", workflow)
 
 
 class AutoEditorWrapperTests(unittest.TestCase):

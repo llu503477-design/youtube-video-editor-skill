@@ -1,8 +1,7 @@
 ---
 name: youtube-video-editor
-description: 使用 FFmpeg、Auto-Editor 31、Whisper、qwentts.cpp、yt-dlp 與內附腳本完成 YouTube 或本機影片的剪裁、分割、合併、轉檔、壓縮、濾鏡、文字與浮水印、速度調整、縮圖、背景音樂混音、preview-first 靜音移除、自動跳剪、語音轉字幕、Qwen3-TTS 授權語音複製、繁體中文與英文雙語 SRT/ASS、字幕燒錄、旁白及批次產線。當使用者要求影片剪輯、自動影片處理、Auto-Editor、YouTube 下載、字幕或 captions、Whisper transcription、voice cloning、聲音複製、BGM/音軌混合、CapCut-like CLI、FFmpeg 指令或 mcp-video 工作流程時使用。
+description: 使用 FFmpeg、Auto-Editor 31、whisper.cpp、qwentts.cpp、yt-dlp 與內附腳本完成 YouTube 或本機影片的剪裁、分割、合併、轉檔、壓縮、濾鏡、文字與浮水印、速度調整、縮圖、背景音樂混音、preview-first 靜音移除、自動跳剪、語音轉字幕、Qwen3-TTS 授權語音複製旁白、Whisper 回聽辨識、Agent 直接翻譯、繁體中文與英文雙語 SRT/ASS、字幕燒錄及批次產線。當使用者要求影片剪輯、自動影片處理、Auto-Editor、YouTube 下載、字幕或 captions、Whisper transcription、voice cloning、聲音複製、旁白、翻譯、BGM/音軌混合、CapCut-like CLI、FFmpeg 指令或 mcp-video 工作流程時使用。
 ---
-
 # YouTube Video Editor
 
 使用可重現的 CLI 管線編輯影片。先保留原始檔，再以新路徑輸出；除非使用者明確允許，不覆寫既有檔案。
@@ -16,7 +15,7 @@ description: 使用 FFmpeg、Auto-Editor 31、Whisper、qwentts.cpp、yt-dlp 與
 5. 先以短片段驗證複雜 filter graph，再處理完整影片或批次。
 6. 執行 `scripts/validate.ps1 -VideoPath <input> -SrtPath <optional.srt> -OutputPath <output>`，並以 FFprobe 與實際播放抽查結果。
 
-內附腳本預設拒絕覆寫既有輸出；只有使用者明確同意時才傳入 PowerShell 的 `-Force` 或 Python CLI 的 `--force`。`narrate.py` 預設任一 TTS 段失敗就停止；只有使用者接受缺段與靜音 placeholder 時才使用 `--allow-partial`。
+內附腳本預設拒絕覆寫既有輸出；只有使用者明確同意時才傳入 PowerShell 的 `-Force` 或 Python CLI 的 `--force`。Qwen 與 Whisper 任一階段失敗時不得發布部分成品；Agent 翻譯未驗證前不得宣稱整個旁白流程完成。
 
 ## 資源導覽
 
@@ -26,8 +25,8 @@ description: 使用 FFmpeg、Auto-Editor 31、Whisper、qwentts.cpp、yt-dlp 與
 - SRT/ASS、雙語字幕與燒錄：讀取 [ffmpeg-core/subtitles.md](ffmpeg-core/subtitles.md)。
 - Whisper 字幕產線：讀取 [ai-subtitles/whisper-pipeline.md](ai-subtitles/whisper-pipeline.md)；只有 FFmpeg 確實提供 `whisper` filter 時才讀取 [ai-subtitles/ffmpeg8-whisper.md](ai-subtitles/ffmpeg8-whisper.md)。
 - Windows 全域 whisper.cpp 安裝：執行 `scripts/install-whisper-cpp.ps1`；轉錄時優先執行 `scripts/whisper-cli.ps1`，它預設使用 multilingual `large-v3-turbo` 並支援影片自動抽取音訊。
-- Qwen3-TTS 語音複製：讀取 [ai-subtitles/qwentts-voice-cloning.md](ai-subtitles/qwentts-voice-cloning.md)；安裝執行 `scripts/install-qwentts-cpp.ps1`，合成優先使用全域 `qwen-voice-clone` 或 `scripts/qwen-voice-clone.ps1`。
-- 旁白與 Edge-TTS：讀取 [ai-subtitles/narration.md](ai-subtitles/narration.md)。
+- Qwen3-TTS 語音複製：讀取 [ai-subtitles/qwentts-voice-cloning.md](ai-subtitles/qwentts-voice-cloning.md)；安裝執行 `scripts/install-qwentts-cpp.ps1`。
+- 旁白：讀取 [ai-subtitles/narration.md](ai-subtitles/narration.md)，預設以 qwentts.cpp 合成、whisper.cpp large-v3-turbo 回聽，再由目前 Agent 直接翻譯 SRT。禁止 Whisper `--translate` 與 OpenAI API。只有使用者明確要求舊 Edge-TTS 分段模式時才使用 `narrate.py`。
 - 靜音移除或跳剪：先讀取 [auto-editing/silence-removal.md](auto-editing/silence-removal.md)；需要策略選擇時再讀取 [auto-editing/jump-cut.md](auto-editing/jump-cut.md)。Windows 安裝執行 `scripts/install-auto-editor.ps1`，一般操作優先使用全域 `auto-edit` 或 `scripts/auto-edit.ps1`，先 `Preview` 再 `Render`。
 - YouTube 下載：讀取 [youtube-download/yt-dlp.md](youtube-download/yt-dlp.md)，並遵守來源授權與平台規範。
 - 批次或完整產線：讀取 [workflows/batch-processing.md](workflows/batch-processing.md) 或 [workflows/full-pipeline.md](workflows/full-pipeline.md)。
@@ -89,8 +88,8 @@ WAV、預設使用 `large-v3-turbo`、建立指定輸出目錄，並拒絕意外
 # 中文轉錄
 pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -OutputPrefix output/input
 
-# 中文語音翻譯成英文字幕
-pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -Task translate -OutputPrefix output/input_en
+# 英文字幕由目前 Agent 讀取 output/input.srt 後直接翻譯，
+# 保留 cue 序號與時間碼，再執行 validate_agent_translation.py。
 
 # CUDA 不可用時改走 CPU
 pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -Cpu -OutputPrefix output/input_cpu
@@ -102,18 +101,23 @@ pwsh -File scripts/whisper-cli.ps1 input.mp4 -Language zh -Cpu -OutputPrefix out
 
 ## qwentts.cpp 語音複製基線
 
-需要複製參考聲音產生影片旁白時，優先使用目前 Windows 使用者的全域
-`qwen-voice-clone` wrapper：
+需要複製參考聲音產生影片旁白時，先用交易式管線完成 Qwen 合成與 Whisper
+原文辨識，再由目前 Agent 直接翻譯：
 
 ```powershell
-qwen-voice-clone `
+pwsh -File scripts/qwen-narration-pipeline.ps1 `
   -TextFile narration.txt `
   -ReferenceWav reference.wav `
   -ReferenceTextFile reference.txt `
-  -Language Chinese `
-  -OutputPath output/narration.wav
+  -OutputPath output/narration.wav `
+  -QwenLanguage Chinese `
+  -WhisperLanguage zh `
+  -ConfirmVoiceRights
 ```
 
+- 腳本輸出 `narration.wav` 與 `narration.asr.srt`。
+- Agent 讀取 `.asr.srt`，保留 cue 結構翻成 `narration.en.srt`，再執行
+  `scripts/validate_agent_translation.py`；不得呼叫 Whisper translate 或 OpenAI API。
 - 預設模型為 1.7B Base Q8_0，codec 為 12 Hz Q8_0。
 - 全域 CLI 位於 `%LOCALAPPDATA%\qwentts.cpp\bin`，模型位於
   `%LOCALAPPDATA%\qwentts.cpp\models`；使用者環境變數為
@@ -128,7 +132,6 @@ qwen-voice-clone `
   日誌確認 `CUDA0`；效能與音色相似度仍須針對正式參考音訊重新驗收。
 
 ---
-
 ## 2. Core Philosophy
 
 ### 2.1 FFmpeg 是核心引擎
@@ -225,17 +228,17 @@ mcp-video 提供 80+ 結構化影片編輯工具，讓 AI Agent 能透過自然�
 ┌─────────────────────────────────────────────────────────┐
 │              Subtitle Generation                         │
 │  Whisper(zh) → audio extraction → transcription → SRT   │
-│  Whisper(translate) → English SRT                       │
+│  Active Agent translates SRT text → English SRT         │
 │  Merge → bilingual SRT (zh-TW main + EN secondary)      │
 │  FFmpeg 8.0+: native whisper filter for single-step     │
 └────────────────────────┬────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │              Narration Generation (Optional)              │
-│  narrate.py: subtitles → narration script per segment    │
-│  Edge-TTS: TTS in zh-TW / en / ja / ko...               │
-│  --mode intro: stage-by-stage guide                     │
-│  --mode full/summary: read-aloud or short summary       │
+│  qwentts.cpp: authorized voice reference → narration WAV │
+│  whisper.cpp transcribe: verify spoken source text       │
+│  Active Agent: translate SRT while preserving timestamps │
+│  validate_agent_translation.py: verify translated SRT    │
 └────────────────────────┬────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -275,7 +278,6 @@ mcp-video 提供 80+ 結構化影片編輯工具，讓 AI Agent 能透過自然�
 ```
 
 ---
-
 ## 5. Quick Reference: Common FFmpeg Commands
 
 ### Video Trimming
@@ -297,9 +299,10 @@ ffmpeg -i input.mp4 -vf "ass=bilingual.ass" -c:v libx264 -crf 23 -c:a aac output
 
 ### Generate Bilingual SRT (zh-TW + EN merged)
 ```powershell
-# Whisper 中文轉錄 + 英文翻譯 → 合併雙語 SRT → 燒錄
+# Whisper 中文轉錄 → Agent 直接翻譯 → 合併雙語 SRT → 燒錄
 pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task transcribe -OutputPrefix output/zh/audio
-pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task translate -OutputPrefix output/en/audio
+# Agent 讀取 output/zh/audio.srt，只翻譯 cue 文字並寫入 output/en/audio.srt。
+python scripts/validate_agent_translation.py output/zh/audio.srt output/en/audio.srt
 python scripts/merge_bilingual_srt.py output/zh/audio.srt output/en/audio.srt bilingual.srt
 ffmpeg -i input.mp4 -vf "subtitles=bilingual.srt:force_style='FontName=Noto Sans TC,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=50,BorderStyle=1'"
        -c:v libx264 -crf 23 -c:a aac output.mp4
@@ -320,17 +323,15 @@ auto-edit -InputPath input.mp4 -OutputPath output.mp4 -Profile Balanced -Mode Re
 
 ### Generate Video Narration from Subtitles (TTS Voiceover)
 ```powershell
-# 從字幕產生階段性旁白（繁體中文，intro 模式）
-python scripts/narrate.py --subs bilingual.srt --lang zh-TW --mode intro --output narration.wav
-
-# 英文旁白（用於國際化）
-python scripts/narrate.py --subs bilingual.srt --lang en --voice en-US-AriaNeural --output narration_en.wav
-
-# 自訂旁白稿
-python scripts/narrate.py --script narration_script.txt --lang zh-TW --output narration.wav
-
-# 旁白 + 對齊時間軸的字幕輸出（旁白說什麼，字幕就顯示什麼）
-python scripts/narrate.py --subs bilingual.srt --lang zh-TW --mode intro --output narration.wav --output-subs narration.srt
+pwsh -File scripts/qwen-narration-pipeline.ps1 `
+  -TextFile narration.txt `
+  -ReferenceWav reference.wav `
+  -ReferenceTextFile reference.txt `
+  -OutputPath output/narration.wav `
+  -QwenLanguage Chinese -WhisperLanguage zh `
+  -ConfirmVoiceRights
+# 腳本產生 narration.wav 與 narration.asr.srt；
+# Agent 再翻譯為 narration.en.srt 並執行 validate_agent_translation.py。
 
 # 混音：旁白 + 原始音訊（auto-ducking）
 ffmpeg -i input.mp4 -i narration.wav `
@@ -344,8 +345,8 @@ ffmpeg -i input.mp4 -i narration.wav `
 ffmpeg -i input.mp4 -vn -acodec pcm_s16le -ar 16000 -ac 1 audio.wav
 # Step 2: Transcribe Chinese (zh)
 pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task transcribe -OutputPrefix output/zh/audio
-# Step 3: Translate to English
-pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task translate -OutputPrefix output/en/audio
+# Step 3: Agent translates cue text to output/en/audio.srt, preserving structure
+python scripts/validate_agent_translation.py output/zh/audio.srt output/en/audio.srt
 # Step 4: Merge bilingual SRT (Chinese main, English sub)
 python scripts/merge_bilingual_srt.py output/zh/audio.srt output/en/audio.srt bilingual.srt
 # Step 5: Burn bilingual subtitles (Chinese larger, English smaller via ASS)
@@ -355,13 +356,13 @@ ffmpeg -i input.mp4 -vf "subtitles=bilingual.srt" -c:v libx264 -crf 23 -c:a copy
 ### Full Bilingual Pipeline: English Audio → zh-TW + EN Subtitles
 
 > ⚠️ **v1.2 起 deprecated**：generate_bilingual_from_en.py 不再維護。
-> 改用兩階段 Whisper 管線（更簡單、更準確）：
+> 改用 Whisper 辨識後由目前 Agent 直接翻譯：
 
 ```powershell
 # Step 1: 中文轉錄
 pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task transcribe -OutputPrefix output/zh/audio
-# Step 2: 英文翻譯（使用獨立目錄，避免覆寫中文 SRT）
-pwsh -File scripts/whisper-cli.ps1 audio.wav -Language zh -Task translate -OutputPrefix output/en/audio
+# Step 2: Agent 讀取中文 SRT 並直接翻譯為 output/en/audio.srt
+python scripts/validate_agent_translation.py output/zh/audio.srt output/en/audio.srt
 # Step 3: 合併為雙語 ASS（自動偵測影片高度動態縮放字級）
 python scripts/generate_bilingual_ass.py output/zh/audio.srt output/en/audio.srt bilingual.ass --background none --video-height (ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 input.mp4)
 # Step 4: 燒錄雙語字幕（Noto Sans TC 開源字型，動態字級）
@@ -410,7 +411,6 @@ python scripts/thumbnail.py --video input.mp4 --time 10 --title "超強教學" -
 ```
 
 ---
-
 ## 6. Quality Gates
 
 ### Pre-flight Checks
@@ -420,6 +420,7 @@ python scripts/thumbnail.py --video input.mp4 --time 10 --title "超強教學" -
 - [ ] `WHISPER_CPP_MODEL` 指向可讀取的 `ggml-large-v3-turbo.bin`
 - [ ] 語音複製任務已確認授權，且 `qwen-tts --help`、模型與 codec 均可用
 - [ ] 語音複製參考 WAV 清晰，`ReferenceText` 與實際內容逐字一致
+- [ ] 已提供獨立旁白稿；不得把字幕檔的序號與時間碼直接送入 TTS
 - [ ] 輸入檔案存在且可讀取
 - [ ] 輸出目錄有足夠的磁碟空間
 - [ ] 字幕檔案格式正確（SRT 使用 UTF-8 編碼）
@@ -431,6 +432,10 @@ python scripts/thumbnail.py --video input.mp4 --time 10 --title "超強教學" -
 - [ ] whisper.cpp 結束碼為 0，且實際建立要求的 SRT/VTT/TXT/JSON
 - [ ] CUDA 任務日誌出現 `loaded CUDA backend`；失敗時明確改用 `-Cpu`
 - [ ] Qwen3-TTS 輸出是可解碼的 24 kHz mono WAV，並已實際聆聽抽查
+- [ ] 旁白同時存在非空白的 `.asr.*` 原文辨識與 `.en.*` 英文翻譯
+- [ ] `.en.srt` 由目前 Agent 直接翻譯，未使用 Whisper `--translate` 或 OpenAI API
+- [ ] `validate_agent_translation.py` 已確認 cue 數量、序號與時間碼不變
+- [ ] 已比較旁白稿與 Whisper 回聽；回聽只驗證內容，不代表音色相似度合格
 - [ ] 影片長度與預期一致
 - [ ] 雙語字幕顯示正確（中文主體在上、英文在下、時間軸對齊）
 - [ ] 中文字級較大、英文字級較小（ASS 雙樣式檢查）

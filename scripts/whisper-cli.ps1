@@ -29,6 +29,15 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+if ($Task -eq "translate") {
+    throw "whisper.cpp translation is disabled for this skill. Transcribe first, then have the active Agent translate the SRT while preserving cue indexes and timestamps."
+}
+foreach ($argument in $AdditionalArguments) {
+    if ($argument -match "^(?i:--translate|-tr)(?:=|$)") {
+        throw "whisper.cpp translation flags are disabled for this skill. Transcribe first, then have the active Agent translate the SRT."
+    }
+}
+
 $installRoot = Join-Path $env:LOCALAPPDATA "whisper.cpp"
 $defaultModel = Join-Path $installRoot "models\ggml-large-v3-turbo.bin"
 $cpuCli = Join-Path $installRoot "cpu-bin\whisper-cli.exe"
@@ -76,16 +85,21 @@ if (-not (Test-Path -LiteralPath $outputDirectory -PathType Container)) {
 }
 
 $outputPath = "$OutputPrefix.$Format"
+if (Test-Path -LiteralPath $outputPath -PathType Container) {
+    throw "Output path must be a file, not a directory: $outputPath"
+}
 if ((Test-Path -LiteralPath $outputPath) -and -not $Force) {
     throw "Output already exists: $outputPath. Pass -Force only when overwrite is intended."
 }
-if ($Force -and (Test-Path -LiteralPath $outputPath)) {
-    Remove-Item -LiteralPath $outputPath -Force
-}
 
-$temporaryDirectory = $null
+$temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) (
+    "youtube-video-editor-whisper-" + [guid]::NewGuid().ToString("N")
+)
+New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
 $audioPath = $resolvedInput
 $nativeAudioExtensions = @(".flac", ".mp3", ".ogg", ".wav")
+$stagedOutputPrefix = Join-Path $temporaryDirectory "transcript"
+$stagedOutputPath = "$stagedOutputPrefix.$Format"
 
 try {
     if ([System.IO.Path]::GetExtension($resolvedInput).ToLowerInvariant() -notin $nativeAudioExtensions) {
@@ -94,8 +108,6 @@ try {
             throw "FFmpeg is required to extract audio from this input format."
         }
 
-        $temporaryDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ("youtube-video-editor-whisper-" + [guid]::NewGuid().ToString("N"))
-        New-Item -ItemType Directory -Path $temporaryDirectory | Out-Null
         $audioPath = Join-Path $temporaryDirectory "audio.wav"
         & $ffmpeg.Source -hide_banner -loglevel error -i $resolvedInput -vn -acodec pcm_s16le -ar 16000 -ac 1 -y $audioPath
         if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $audioPath -PathType Leaf)) {
@@ -108,11 +120,8 @@ try {
         "--file", $audioPath,
         "--language", $Language,
         "--output-$Format",
-        "--output-file", $OutputPrefix
+        "--output-file", $stagedOutputPrefix
     )
-    if ($Task -eq "translate") {
-        $arguments += "--translate"
-    }
     if ($Threads -gt 0) {
         $arguments += @("--threads", $Threads)
     }
@@ -128,11 +137,37 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw "whisper-cli failed with exit code $LASTEXITCODE."
     }
-    if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
-        throw "whisper-cli completed but did not create the expected output: $outputPath"
+    if (-not (Test-Path -LiteralPath $stagedOutputPath -PathType Leaf)) {
+        throw "whisper-cli completed but did not create the expected staged output: $stagedOutputPath"
+    }
+    if ((Get-Item -LiteralPath $stagedOutputPath).Length -le 0) {
+        throw "whisper-cli created an empty staged output: $stagedOutputPath"
+    }
+
+    $backupPath = $null
+    try {
+        if (Test-Path -LiteralPath $outputPath -PathType Leaf) {
+            $backupPath = "$outputPath.backup.$(Get-Date -Format 'yyyyMMdd-HHmmss-fff')"
+            Move-Item -LiteralPath $outputPath -Destination $backupPath
+        }
+        Move-Item -LiteralPath $stagedOutputPath -Destination $outputPath
+        if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf) -or
+            (Get-Item -LiteralPath $outputPath).Length -le 0) {
+            throw "Failed to publish a non-empty Whisper output: $outputPath"
+        }
+    } catch {
+        if ($backupPath -and
+            (Test-Path -LiteralPath $backupPath -PathType Leaf) -and
+            -not (Test-Path -LiteralPath $outputPath)) {
+            Move-Item -LiteralPath $backupPath -Destination $outputPath
+        }
+        throw
     }
 
     Write-Host "Whisper output: $outputPath" -ForegroundColor Green
+    if ($backupPath) {
+        Write-Host "Previous output backup: $backupPath" -ForegroundColor Yellow
+    }
 } finally {
     if ($temporaryDirectory -and (Test-Path -LiteralPath $temporaryDirectory)) {
         Remove-Item -LiteralPath $temporaryDirectory -Recurse -Force

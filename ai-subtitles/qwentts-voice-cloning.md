@@ -100,6 +100,27 @@ pwsh -File scripts/qwen-voice-clone.ps1 `
 輸出預設拒絕覆寫；只有使用者明確允許時才傳入 `-Force`。CUDA 不可用時可傳入
 `-Cpu`，並在最終報告清楚標示實際使用的 backend。
 
+## 旁白預設管線：合成、回聽、Agent 翻譯
+
+正式影片旁白不要停在 `qwen-voice-clone`。使用整合 wrapper 產生語音並讓
+whisper.cpp large-v3-turbo 做原語言回聽：
+
+```powershell
+pwsh -File scripts/qwen-narration-pipeline.ps1 `
+  -TextFile narration.txt `
+  -ReferenceWav reference.wav `
+  -ReferenceTextFile reference.txt `
+  -OutputPath output\narration.wav `
+  -QwenLanguage Chinese `
+  -WhisperLanguage zh `
+  -ConfirmVoiceRights
+```
+
+腳本成功後建立 `narration.wav` 與 `narration.asr.srt`。目前 Agent 再直接把
+cue 文字翻譯為 `narration.en.srt`，保留序號與時間碼，並執行
+`validate_agent_translation.py`。不得使用 Whisper `--translate` 或 OpenAI API。
+完整規則見 [narration.md](narration.md)。
+
 ## 裸 CLI
 
 `qwen-tts` 從 stdin 讀取目標文字：

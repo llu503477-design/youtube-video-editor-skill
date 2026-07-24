@@ -2,10 +2,10 @@
 
 給 OpenAI Codex Desktop／CLI 使用的影片編輯技能。整合 FFmpeg、Auto-Editor、
 whisper.cpp、qwentts.cpp、yt-dlp 與 PowerShell／Python wrapper，可完成剪輯、雙語字幕、
-字幕燒錄、背景音樂、旁白、授權語音複製、縮圖與批次處理。
+字幕燒錄、背景音樂、授權語音複製旁白、Whisper 回聽、Agent 翻譯、縮圖及批次處理。
 
 > English: A Codex skill for reproducible video editing, multilingual subtitles,
-> Whisper transcription, authorized Qwen3-TTS voice cloning, narration and
+> Whisper transcription, Agent-authored translation, authorized Qwen3-TTS narration and
 > FFmpeg-based production workflows.
 
 ## 在 Codex 中安裝
@@ -70,7 +70,8 @@ Desktop／CLI，請附上輸入檔及需求，或把本 repo 的 `SKILL.md` 和�
 ```text
 使用 $youtube-video-editor，將 D:\videos\course.mp4 產生繁中與英文雙語字幕。
 中文在上、英文在下，使用 ASS 分開控制字級；輸出到 D:\videos\course_bilingual.mp4。
-使用 whisper.cpp 先轉錄中文再翻譯英文，不覆寫原檔，完成後驗證影音與字幕時間軸。
+使用 whisper.cpp 只轉錄中文，再由你直接翻譯英文；不要使用 Whisper translate 或
+OpenAI API。不覆寫原檔，完成後驗證影音與字幕時間軸。
 ```
 
 ### 範例：授權語音複製旁白
@@ -82,11 +83,12 @@ Desktop／CLI，請附上輸入檔及需求，或把本 repo 的 `SKILL.md` 和�
 旁白稿：D:\voice\narration.txt
 參考音訊：D:\voice\reference.wav
 參考逐字稿：D:\voice\reference.txt
-輸出：D:\voice\narration-clone.wav
-處理要求：使用全域 qwentts.cpp 1.7B Base Q8_0、Language Chinese、seed 42。
+輸出：D:\voice\narration.wav、narration.asr.srt、narration.en.srt
+處理要求：使用全域 qwentts.cpp 1.7B Base Q8_0、Language Chinese、seed 42；
+合成後用 whisper.cpp large-v3-turbo 回聽辨識中文，再由你直接翻譯成英文 SRT。
 限制：不得修改參考音訊，不得覆寫輸出。
 驗收條件：確認 CUDA0 與 ICL 啟用，輸出為 24 kHz mono PCM16 WAV，
-並以 FFprobe、反向 ASR 及人工聆聽驗收。
+比較旁白稿與反向 ASR；英文 SRT 必須保留所有 cue 序號與時間碼並通過驗證。
 ```
 
 只有本人聲音或已取得權利人明確授權的聲音才能用於 voice cloning。對外發布
@@ -155,22 +157,35 @@ pwsh -File scripts/whisper-cli.ps1 input.mp4 `
 pwsh -File scripts/install-qwentts-cpp.ps1
 ```
 
-語音複製：
+旁白合成與回聽辨識：
 
 ```powershell
-pwsh -File scripts/qwen-voice-clone.ps1 `
+pwsh -File scripts/qwen-narration-pipeline.ps1 `
   -TextFile narration.txt `
   -ReferenceWav reference.wav `
   -ReferenceTextFile reference.txt `
-  -Language Chinese `
-  -OutputPath output/narration.wav
+  -OutputPath output/narration.wav `
+  -QwenLanguage Chinese `
+  -WhisperLanguage zh `
+  -ConfirmVoiceRights
 ```
+
+成功後建立 `narration.wav` 與 `narration.asr.srt`。接著由目前 Agent 直接翻譯
+cue 文字到 `narration.en.srt`，保留序號與時間碼，再執行：
+
+```powershell
+python scripts/validate_agent_translation.py `
+  output/narration.asr.srt output/narration.en.srt
+```
+
+不使用 Whisper `--translate`，也不呼叫 OpenAI API。
 
 ## 文件導覽
 
 - [技能入口與品質規則](SKILL.md)
 - [whisper.cpp 字幕產線](ai-subtitles/whisper-pipeline.md)
 - [Qwen3-TTS 語音複製](ai-subtitles/qwentts-voice-cloning.md)
+- [Qwen 旁白、Whisper 回聽與 Agent 翻譯](ai-subtitles/narration.md)
 - [Auto-Editor 安全靜音移除](auto-editing/silence-removal.md)
 - [Auto-Editor 跳剪策略](auto-editing/jump-cut.md)
 - [FFmpeg 基本剪輯](ffmpeg-core/basic-editing.md)
@@ -188,7 +203,8 @@ python "$HOME\.codex\skills\.system\skill-creator\scripts\quick_validate.py" .
 ```
 
 目前測試涵蓋輸出防覆寫、字幕時間對齊、旁白失敗處理、縮圖、FFmpeg
-剪輯 smoke、whisper.cpp wrapper 與 qwentts.cpp wrapper。
+剪輯 smoke、whisper.cpp wrapper、qwentts.cpp wrapper、Qwen → Whisper 回聽
+管線，以及 Agent 翻譯 SRT 的結構驗證。
 
 ## 不包含的檔案
 

@@ -1,358 +1,201 @@
 # Workflow — Batch Processing
 
-## Overview
+## Purpose
 
-批次處理大量影片的自動化工作流程。適用於：
-- YouTube 頻道大量內容處理
-- 教育課程影片批次字幕化
-- Podcast 影片自動修剪與發布
-- 社交媒體短片批量生產
+由目前 Codex／Agent 批次處理多部影片。Agent 對每個檔案依序執行：
 
-## Batch Pipeline Script
+`Auto-Editor → Whisper 原文 SRT → Agent 翻譯 → 驗證 → 旁白 → 混音 → 輸出`
+
+不要嘗試讓一個獨立 PowerShell 迴圈在執行途中「呼叫 Agent 翻譯」；Agent 應在
+每個檔案的工具呼叫之間直接讀取並翻譯 SRT。這能維持 fail-closed，也不需要
+容易漂移的 Prepare/Finalize manifest 或重跑旗標。
+
+## Prompt
+
+```text
+使用 youtube-video-editor 批次處理 D:\raw 內的 MP4。
+先以第一部影片預覽 Balanced Auto-Editor；我核准後才處理全部檔案。
+每部影片用 whisper.cpp large-v3-turbo 轉錄中文，再由你直接翻譯英文 SRT。
+不要使用 OpenAI API、外部翻譯服務或 Whisper translate。
+每部影片驗證字幕結構後才合併雙語字幕；任何必要階段失敗就把該檔標記失敗，
+不得輸出或回報降級成品。每部影片都要附輸出與驗證結果。
+```
+
+## Agent execution contract
+
+- 先列出精確輸入清單與預定輸出；不要遞迴掃描未授權目錄。
+- 先用代表影片預覽 Auto-Editor；取得核准後才進行批次 Render。
+- 每部影片使用獨立工作目錄，避免同名暫存檔與平行競態。
+- 目前 Agent 直接翻譯 SRT；只改 cue 文字，保留 cue 數量、序號與時間碼。
+- 每個 native command 檢查 `$LASTEXITCODE` 與非空輸出。
+- 單檔失敗可繼續下一檔，但 `$failed` 必須增加，且不能留下「成功」成品。
+- 預設序列處理 GPU 工作；只有量測 VRAM 足夠時才提高並行度。
+
+## 1. Inventory and representative preview
 
 ```powershell
-# batch-process.ps1 — Batch Video Processing
-param(
-    [Parameter(Mandatory=$true)]
-    [string]$InputDir,          # 輸入目錄（含影片檔案）
-    [string]$OutputDir = "output",
-    [string]$BgmFile,           # 共用背景音樂（可選）
-    [string]$WhisperModelPath = $env:WHISPER_CPP_MODEL,
-    [string]$FilePattern = "*.mp4",  # 檔案過濾模式
-    [string]$SubtitleLang = "zh",    # 字幕語言（預設繁體中文）
-    [switch]$Recurse,            # 遞迴子目錄
-    [switch]$Bilingual,          # 雙語字幕（zh-TW + EN）
-    [switch]$AssFormat,          # 使用 ASS 格式（中文字大、英文字小）
-    [ValidateSet('none','black')]
-    [string]$SubBg = "black",    # 字幕背景: none (透明) 或 black (黑底包覆文字)
-    [switch]$Narrate,            # 啟用旁白 (TTS voiceover)
-    [string]$NarrateLang = "zh-TW",  # 旁白語言
-    [string]$NarrateVoice,       # Edge-TTS 發音人
-    [ValidateSet('intro','full','summary')]
-    [string]$NarrateMode = "intro",  # 旁白模式
-    [switch]$SilenceRemove,      # 啟用靜音移除
-    [ValidateSet('Conservative','Balanced','Aggressive','Podcast','Motion','FastReview')]
-    [string]$AutoEditProfile = "Balanced",
-    [switch]$ApproveAutoEdit,     # 確認已先用代表性影片預覽 profile
-    [int]$MaxConcurrent = 1      # 最大並行數（預設為序）
-)
+Set-Location E:\youtube_videos_editor
+$inputDir = "D:\raw"
+$outputDir = "D:\processed"
+$files = @(Get-ChildItem -LiteralPath $inputDir -Filter *.mp4 -File)
+if ($files.Count -eq 0) { throw "No input MP4 files found." }
 
-$ErrorActionPreference = "Continue"
+New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+pwsh -NoLogo -NoProfile -File .\scripts\check-dependencies.ps1
+if ($LASTEXITCODE -ne 0) { throw "Dependency preflight failed." }
 
-# 確保輸出目錄存在
-New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
-
-# 收集要處理的檔案
-$getParams = @{Path=$InputDir; Filter=$FilePattern}
-if ($Recurse) { $getParams["Recurse"] = $true }
-$files = Get-ChildItem @getParams
-
-Write-Host "========================================"
-Write-Host "Batch Video Processing"
-Write-Host "========================================"
-Write-Host "Found $($files.Count) files to process"
-Write-Host ""
-
-if ($files.Count -eq 0) {
-    Write-Host "No files found matching pattern: $FilePattern in $InputDir"
-    exit 1
-}
-
-if ($SilenceRemove) {
-    $autoEditScript = Join-Path $PSScriptRoot "scripts\auto-edit.ps1"
-    if (-not (Test-Path -LiteralPath $autoEditScript -PathType Leaf)) {
-        throw "Auto-Editor wrapper not found: $autoEditScript"
-    }
-    & $autoEditScript -InputPath $files[0].FullName -Profile $AutoEditProfile -Mode Preview
-    if (-not $ApproveAutoEdit) {
-        throw "Review this representative preview, then rerun with -ApproveAutoEdit."
-    }
-}
-
-$processed = 0
-$failed = 0
-$logFile = Join-Path $OutputDir "batch_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
-
-foreach ($file in $files) {
-    $baseName = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-    $outputPath = Join-Path $OutputDir "${baseName}_processed.mp4"
-    $srtPath = Join-Path $OutputDir "${baseName}.srt"
-    $zhSrtPath = Join-Path $OutputDir "${baseName}.zh.srt"
-    $enSrtPath = Join-Path $OutputDir "${baseName}.en.srt"
-    $bilingualSrtPath = Join-Path $OutputDir "${baseName}.bilingual.srt"
-    $assPath = Join-Path $OutputDir "${baseName}.bilingual.ass"
-
-    Write-Host "[$($processed+$failed+1)/$($files.Count)] Processing: $($file.Name)" -ForegroundColor Cyan
-
-    # Step 1: Silence removal (optional)
-    $currentInput = $file.FullName
-    if ($SilenceRemove) {
-        $tempEdited = Join-Path $OutputDir "_temp_${baseName}.mp4"
-        try {
-            & $autoEditScript -InputPath $currentInput -OutputPath $tempEdited `
-                -Profile $AutoEditProfile -Mode Render
-            $currentInput = $tempEdited
-            Write-Host "  -> Silence removed"
-        } catch {
-            throw "Auto-Editor failed for $($file.FullName): $($_.Exception.Message)"
-        }
-    }
-
-    # Step 2: Audio extraction
-    $audioFile = Join-Path $OutputDir "_temp_${baseName}.wav"
-    try {
-        ffmpeg -i $currentInput -vn -acodec pcm_s16le -ar 16000 -ac 1 $audioFile -y
-        Write-Host "  -> Audio extracted"
-    } catch {
-        Write-Host "  -> Audio extraction failed" -ForegroundColor Red
-        $failed++
-        continue
-    }
-
-    # Step 3: Generate subtitles
-    try {
-        if ($Bilingual) {
-            Write-Host "  -> Bilingual mode: transcribing Chinese (zh)..."
-            & scripts/whisper-cli.ps1 $audioFile -ModelPath $WhisperModelPath -Language zh `
-                -Task transcribe -OutputPrefix ([System.IO.Path]::ChangeExtension($zhSrtPath, $null)) 2>&1 | Out-Null
-
-            Write-Host "  -> Translating to English..."
-            & scripts/whisper-cli.ps1 $audioFile -ModelPath $WhisperModelPath -Language zh `
-                -Task translate -OutputPrefix ([System.IO.Path]::ChangeExtension($enSrtPath, $null)) 2>&1 | Out-Null
-
-            if ((Test-Path $zhSrtPath) -and (Test-Path $enSrtPath)) {
-                if ($AssFormat) {
-                    python scripts/generate_bilingual_ass.py $zhSrtPath $enSrtPath $assPath
-                    Write-Host "  -> Bilingual ASS generated (zh 24px / en 18px)"
-                } else {
-                    python scripts/merge_bilingual_srt.py $zhSrtPath $enSrtPath $bilingualSrtPath
-                    Write-Host "  -> Bilingual SRT merged"
-                }
-            }
-        } else {
-            & scripts/whisper-cli.ps1 $audioFile -ModelPath $WhisperModelPath -Language $SubtitleLang `
-                -OutputPrefix ([System.IO.Path]::ChangeExtension($srtPath, $null)) 2>&1 | Out-Null
-            Write-Host "  -> Subtitles generated"
-        }
-    } catch {
-        Write-Host "  -> Subtitle generation failed (skipping)" -ForegroundColor Yellow
-    }
-
-    # Step 4: Add BGM and burn subtitles
-    $buildArgs = @("-i", $currentInput)
-    $filterComplex = ""
-    $mapArgs = @()
-
-    if ($BgmFile -and (Test-Path $BgmFile)) {
-        $buildArgs += @("-i", $BgmFile)
-        $filterComplex = "[1:a]volume=0.3[bgm];[0:a][bgm]amix=inputs=2:duration=shortest:dropout_transition=2[aout]"
-        $mapArgs = @("-map", "0:v", "-map", "[aout]")
-    } else {
-        $mapArgs = @("-map", "0:v", "-map", "0:a")
-    }
-
-    # ── Dynamic font scaling based on video height ──
-    $videoHeight = & ffprobe -v error -select_streams v:0 -show_entries stream=height -of default=noprint_wrappers=1:nokey=1 $currentInput 2>&1
-    if (-not $videoHeight -or $videoHeight -le 0) { $videoHeight = 1080 }
-    $refHeight = 1080
-    $scaleFactor = [math]::Max(0.44, [math]::Min(4.0, [double]$videoHeight / $refHeight))
-    $zhFontSize = [math]::Round(22 * $scaleFactor)
-    $enFontSize = [math]::Round(16 * $scaleFactor)
-    $marginV = [math]::Round(50 * $scaleFactor)
-
-    # Build background style based on SubBg
-    if ($SubBg -eq "black") {
-        $bgStyle = "FontName=Noto Sans TC,FontSize=$zhFontSize,BackColour=&H80000000,BorderStyle=4,Outline=0,Shadow=0,MarginV=$marginV"
-        $bgLabel = "black box (zh=${zhFontSize}px, scaled=$($scaleFactor.ToString('0.00')))"
-    } else {
-        $bgStyle = "FontName=Noto Sans TC,FontSize=$zhFontSize,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=$marginV,BorderStyle=1"
-        $bgLabel = "transparent outline+shadow (zh=${zhFontSize}px, scaled=$($scaleFactor.ToString('0.00')))"
-    }
-
-    # ── Narration generation (optional) ──
-    $narrationWav = $null
-    if ($Narrate -and (Test-Path $srtPath)) {
-        $narrationWav = Join-Path $OutputDir "${baseName}_narration.wav"
-        Write-Host "  -> Generating narration ($NarrateLang, $NarrateMode)..."
-        $narrateArgs = @("--subs", $srtPath, "--lang", $NarrateLang, "--mode", $NarrateMode, "--output", $narrationWav)
-        if ($NarrateVoice) { $narrateArgs += @("--voice", $NarrateVoice) }
-        python scripts/narrate.py @narrateArgs 2>&1 | Out-Null
-        if (Test-Path $narrationWav) {
-            Write-Host "  -> Narration generated: $narrationWav"
-        } else {
-            Write-Host "  -> Narration failed" -ForegroundColor Yellow
-            $narrationWav = $null
-        }
-    }
-
-    # Subtitle filter: ASS > bilingual SRT > monolingual SRT
-    $subFilter = ""
-    if ($Bilingual -and $AssFormat -and (Test-Path $assPath)) {
-        $subFilter = "-vf", "ass=$assPath"
-        Write-Host "  -> Burning bilingual ASS subtitles (zh=${zhFontSize}px / en=${enFontSize}px, auto-scaled)"
-    } elseif ($Bilingual -and (Test-Path $bilingualSrtPath)) {
-        $subFilter = "-vf", "subtitles=$bilingualSrtPath:force_style='$bgStyle'"
-        Write-Host "  -> Burning bilingual SRT subtitles ($bgLabel)"
-    } elseif (Test-Path $srtPath) {
-        $subFilter = "-vf", "subtitles=$srtPath:force_style='FontName=Noto Sans TC,FontSize=$zhFontSize,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=$marginV,BorderStyle=1'"
-        Write-Host "  -> Burning subtitles ($bgLabel)"
-    }
-
-    # If narration is available, use sidechain ducking instead of basic amix
-    $narrationFilter = ""
-    if ($narrationWav -and (Test-Path $narrationWav)) {
-        # Add narration as input
-        $buildArgs += @("-i", $narrationWav)
-        $narrationIdx = $buildArgs.Count - 2  # Last -i argument pair
-        # Base filter: narration duck original audio
-        $narrationFilter = "[${narrationIdx}:a]adelay=2000|2000[narration];[0:a][narration]sidechaincompress=level_in=1:threshold=0.015:ratio=10:attack=100:release=500[ducked];[ducked][narration]amix=inputs=2:duration=first[aout_narr]"
-    }
-
-    if ($filterComplex -and $narrationFilter) {
-        # Three-layer: narration duck + BGM
-        $narrationIdx = $buildArgs.Count - 2
-        $fullFilter = "${narrationFilter};[aout_narr][${narrationIdx}:a]amix=inputs=2:duration=first[aout]"
-        & ffmpeg $buildArgs -filter_complex $fullFilter $subFilter -c:v libx264 -crf 23 -c:a aac $outputPath -y 2>&1 | Out-Null
-    } elseif ($narrationFilter) {
-        # Two-layer: narration duck original (no BGM)
-        & ffmpeg $buildArgs -filter_complex $narrationFilter -map 0:v -map "[aout_narr]" $subFilter -c:v libx264 -crf 23 -c:a aac $outputPath -y 2>&1 | Out-Null
-    } elseif ($filterComplex) {
-        & ffmpeg $buildArgs -filter_complex $filterComplex $mapArgs $subFilter -c:v libx264 -crf 23 -c:a aac $outputPath -y 2>&1 | Out-Null
-    } else {
-        & ffmpeg $buildArgs $mapArgs $subFilter -c:v libx264 -crf 23 -c:a aac $outputPath -y 2>&1 | Out-Null
-    }
-
-    # Cleanup
-    if (Test-Path $audioFile) { Remove-Item $audioFile -Force }
-    if ($SilenceRemove -and (Test-Path $currentInput) -and $currentInput -ne $file.FullName) {
-        Remove-Item $currentInput -Force
-    }
-
-    if (Test-Path $outputPath) {
-        $outSize = (Get-Item $outputPath).Length
-        $outSizeMB = [math]::Round($outSize / 1MB, 2)
-        Write-Host "  -> ✅ Done: $outputPath (${outSizeMB}MB)" -ForegroundColor Green
-        $processed++
-
-        # 寫入日誌
-        "$($file.Name) -> $outputPath" | Out-File $logFile -Append
-    } else {
-        Write-Host "  -> ❌ Failed to create output" -ForegroundColor Red
-        $failed++
-    }
-
-    Write-Host ""
-}
-
-Write-Host "========================================"
-Write-Host "Batch Processing Complete!"
-Write-Host "========================================"
-Write-Host "Total: $($files.Count), Processed: $processed, Failed: $failed"
-Write-Host "Output directory: $OutputDir"
-Write-Host "Log file: $logFile"
+pwsh -NoLogo -NoProfile -File .\scripts\auto-edit.ps1 `
+  -InputPath $files[0].FullName -Profile Balanced -Mode Preview
+if ($LASTEXITCODE -ne 0) { throw "Representative preview failed." }
 ```
 
-## Usage Examples
+Agent 在這裡等待使用者核准。核准後，逐檔執行以下階段。
+
+## 2. Per-file workspace and Auto-Editor
 
 ```powershell
-# 批次處理目錄中所有 MP4
-.\batch-process.ps1 -InputDir "D:\raw_videos" -OutputDir "D:\processed"
+$base = [IO.Path]::GetFileNameWithoutExtension($file.Name)
+$work = Join-Path $outputDir ("work-" + $base)
+$edited = Join-Path $work "edited.mp4"
+$audio = Join-Path $work "edited.wav"
+$zhSrt = Join-Path $work "edited.zh.srt"
+$enSrt = Join-Path $work "edited.en.srt"
+$bilingualSrt = Join-Path $work "edited.bilingual.srt"
+$output = Join-Path $outputDir ($base + "-processed.mp4")
+New-Item -ItemType Directory -Force -Path $work | Out-Null
+if (Test-Path -LiteralPath $output) {
+    throw "Final output already exists; choose a new path: $output"
+}
 
-# 處理所有 MOV 檔案（含子目錄）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -FilePattern "*.mov" -Recurse
-
-# 加入 BGM + 靜音移除（第一次不加 ApproveAutoEdit，只預覽代表性影片）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -BgmFile "D:\music\bgm.mp3" -SilenceRemove
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -BgmFile "D:\music\bgm.mp3" -SilenceRemove -ApproveAutoEdit
-
-# 使用 medium Whisper 模型
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -WhisperModelPath $env:WHISPER_CPP_MODEL
-
-# 雙語字幕批次（zh-TW + EN 合併 SRT）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual
-
-# 雙語字幕 + ASS 格式批次（中文 24px、英文 18px）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -AssFormat
-
-# 完整處理：雙語 ASS + BGM + 靜音移除
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -AssFormat -BgmFile "D:\music\bgm.mp3" -SilenceRemove -ApproveAutoEdit
-
-# 無黑底字幕（乾淨風格統一外觀）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -SubBg none
-
-# 黑底字幕（高可讀性，僅包覆文字）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -SubBg black
-
-# 批次旁白（繁體中文，階段性介紹）
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -Narrate
-
-# 批次旁白 + 英文發音
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -Narrate -NarrateLang en -NarrateVoice en-US-AriaNeural
-
-# 完整批次：雙語 + 旁白 + BGM + 靜音移除
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -Narrate -NarrateLang zh-TW -BgmFile "D:\music\bgm.mp3" -SilenceRemove -ApproveAutoEdit
-```
-
-## Batch Processing Strategies
-
-### 策略 1: 完整批次（適用於大量同類型內容）
-
-```
-Input:  10 部教學影片
-Process:
-  1. 全部靜音移除
-  2. 全部 Whisper 轉錄
-  3. 全部加入共同 BGM
-  4. 全部燒錄字幕
-Output: 10 部處理完成的影片
-```
-
-### 策略 2: 分段批次（適用於長影片）
-
-```
-Input:  1 部 60 分鐘長片
-Process:
-  1. 分割為 12 個 5 分鐘片段
-  2. 每段獨立處理
-  3. 重新合併
-Output: 1 部處理完成的長片
-```
-
-### 策略 3: 平行批次（需要多核心 CPU / GPU）
-
-```
-Input:  20 部短片
-Process:
-  1. 同時處理 4 部（使用 -MaxConcurrent 4）
-  2. 每部獨立產線
-Output: 20 部處理完成的影片
-```
-
-## Performance Considerations
-
-| 因素 | 影響 | 建議 |
-|------|------|------|
-| CPU 核心數 | 轉碼速度 | 使用 `-t` 參數設定線程數 |
-| GPU | 編碼加速 | NVENC 可加速 3-5x |
-| VRAM | Whisper 模型大小 | medium=5GB, large=10GB |
-| 磁碟 I/O | 讀寫速度 | 使用 SSD，分離來源/輸出目錄 |
-| 檔案大小 | 磁碟空間 | 確保有 2-3x 原始大小的空間 |
-
-## Error Handling
-
-批次處理時，建議：
-1. 先對 1-2 個樣本執行完整流程確認參數正確
-2. 使用 `-ErrorAction Continue` 讓單一檔案失敗不中斷批次
-3. 記錄日誌以便事後檢查失敗原因
-4. 失敗的檔案可重新處理（腳本會跳過已存在的輸出）
-
-## Quality Assurance
-
-批次處理完成後：
-```powershell
-# 檢查所有輸出檔案
-Get-ChildItem $OutputDir -Filter "*_processed.mp4" | ForEach-Object {
-    $info = ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 $_.FullName
-    Write-Host "$($_.Name): ${info}s, $( [math]::Round($_.Length/1MB, 2) )MB"
+pwsh -NoLogo -NoProfile -File .\scripts\auto-edit.ps1 `
+  -InputPath $file.FullName -OutputPath $edited `
+  -Profile Balanced -Mode Render
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $edited -PathType Leaf)) {
+    throw "Auto-Editor failed for $($file.FullName)."
 }
 ```
+
+## 3. Whisper transcription and Agent translation
+
+```powershell
+ffmpeg -hide_banner -loglevel error -i $edited -vn -acodec pcm_s16le `
+  -ar 16000 -ac 1 -y $audio
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $audio -PathType Leaf)) {
+    throw "Audio extraction failed for $($file.FullName)."
+}
+
+pwsh -NoLogo -NoProfile -File .\scripts\whisper-cli.ps1 $audio `
+  -Language zh -Task transcribe `
+  -OutputPrefix ([IO.Path]::ChangeExtension($zhSrt, $null))
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $zhSrt -PathType Leaf)) {
+    throw "Whisper transcription failed for $($file.FullName)."
+}
+```
+
+目前 Agent 接著：
+
+1. 讀取 `$zhSrt`。
+2. 直接翻譯每個 cue 的文字。
+3. 寫入 `$enSrt`，不加入 Markdown 或解說。
+4. 驗證後才合併。
+
+```powershell
+python .\scripts\validate_agent_translation.py $zhSrt $enSrt
+if ($LASTEXITCODE -ne 0) { throw "Agent translation validation failed." }
+
+python .\scripts\merge_bilingual_srt.py $zhSrt $enSrt $bilingualSrt
+if ($LASTEXITCODE -ne 0 -or
+    -not (Test-Path -LiteralPath $bilingualSrt -PathType Leaf)) {
+    throw "Bilingual subtitle merge failed."
+}
+```
+
+## 4. Optional Qwen narration
+
+每部影片使用對應的 `<basename>.txt` 旁白稿。參考聲音只能使用本人聲音或明確
+授權素材。
+
+```powershell
+$narrationScript = Join-Path "D:\narration-scripts" ($base + ".txt")
+$narration = Join-Path $work "narration.wav"
+$narrationAsr = Join-Path $work "narration.asr.srt"
+$narrationEn = Join-Path $work "narration.en.srt"
+
+pwsh -NoLogo -NoProfile -File .\scripts\qwen-narration-pipeline.ps1 `
+  -TextFile $narrationScript `
+  -ReferenceWav "D:\voice\reference.wav" `
+  -ReferenceTextFile "D:\voice\reference.txt" `
+  -OutputPath $narration `
+  -QwenLanguage Chinese -WhisperLanguage zh `
+  -ConfirmVoiceRights
+if ($LASTEXITCODE -ne 0 -or
+    -not (Test-Path -LiteralPath $narration -PathType Leaf) -or
+    -not (Test-Path -LiteralPath $narrationAsr -PathType Leaf)) {
+    throw "Narration pipeline failed for $($file.FullName)."
+}
+```
+
+Agent 翻譯 `$narrationAsr` 成 `$narrationEn` 後：
+
+```powershell
+python .\scripts\validate_agent_translation.py $narrationAsr $narrationEn
+if ($LASTEXITCODE -ne 0) { throw "Narration translation validation failed." }
+```
+
+## 5. Correct FFmpeg input mapping
+
+不要以 PowerShell 陣列元素數量推算 FFmpeg input index。明確固定：
+
+- `0`：剪輯後影片
+- `1`：旁白
+- `2`：BGM（有提供時）
+
+旁白、BGM 與原音三層混音：
+
+```powershell
+$bgm = "D:\music\bgm.mp3"
+$mixed = Join-Path $work "mixed.mp4"
+ffmpeg -hide_banner -loglevel error -i $edited -i $narration -i $bgm `
+  -filter_complex "[1:a]adelay=2000|2000[narration];[0:a][narration]sidechaincompress=threshold=0.015:ratio=10:attack=100:release=500[ducked];[ducked][narration]amix=inputs=2:duration=first[mix1];[2:a]volume=0.12[bgm];[mix1][bgm]amix=inputs=2:duration=first[aout]" `
+  -map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k -y $mixed
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $mixed -PathType Leaf)) {
+    throw "Audio mixing failed for $($file.FullName)."
+}
+```
+
+只有旁白時仍明確映射 `[aout]`：
+
+```powershell
+ffmpeg -hide_banner -loglevel error -i $edited -i $narration `
+  -filter_complex "[1:a]adelay=2000|2000[narration];[0:a][narration]sidechaincompress=threshold=0.015:ratio=10:attack=100:release=500[ducked];[ducked][narration]amix=inputs=2:duration=first[aout]" `
+  -map 0:v -map "[aout]" -c:v copy -c:a aac -b:a 192k -y $mixed
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $mixed -PathType Leaf)) {
+    throw "Narration mixing failed for $($file.FullName)."
+}
+```
+
+## 6. Burn subtitles and record result
+
+```powershell
+$escapedSrt = $bilingualSrt.Replace("\", "/").Replace(":", "\:")
+ffmpeg -hide_banner -loglevel error -i $mixed `
+  -vf "subtitles='$escapedSrt':force_style='FontName=Noto Sans TC,FontSize=22,Outline=2,Shadow=1,MarginV=50'" `
+  -c:v libx264 -crf 23 -c:a copy -n $output
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $output -PathType Leaf)) {
+    throw "Final render failed for $($file.FullName)."
+}
+```
+
+Agent 為每個檔案保存結果：
+
+```text
+input: absolute source path
+output: absolute final path
+status: passed | failed
+stages: auto-edit, asr, agent-translation, narration, mix, render
+duration: input/output seconds
+notes: backend, warnings, semantic review
+```
+
+只有所有必要階段與最終播放檢查通過，該檔才能計入 `processed`。失敗檔計入
+`failed`，保留工作目錄與錯誤證據，繼續下一檔。

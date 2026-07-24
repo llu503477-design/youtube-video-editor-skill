@@ -174,8 +174,8 @@ ffprobe -v error -show_entries stream=index,codec_name,codec_type:stream_tags=la
 # Step 1: Whisper 產生中文 SRT（轉錄）
 whisper audio.wav --model small --language zh --task transcribe --output_format srt --output_dir output/zh
 
-# Step 2: Whisper 產生英文 SRT（翻譯）
-whisper audio.wav --model small --language zh --task translate --output_format srt --output_dir output/en
+# Step 2: 目前 Agent 讀取中文 SRT，只翻譯 cue 文字到 output/en/audio.srt
+python scripts/validate_agent_translation.py output/zh/audio.srt output/en/audio.srt
 
 # Step 3: 使用 Python 腳本合併雙語 SRT
 python scripts/merge_bilingual_srt.py output/zh/audio.srt output/en/audio.srt bilingual.srt
@@ -381,7 +381,7 @@ ffmpeg -i subs.vtt subs.srt
 8. **安全邊距**：`MarginV` 自動縮放（1080p 基準 zh=50px, en=30px）
 9. **遮蓋原始字幕**：使用 `SubBg=black`（`BorderStyle=4` + `BackColour=&H80000000`），為每行字幕提供半透明黑底（僅包覆文字寬度）。若需全寬遮罩再搭配 `drawbox`
 10. **背景選擇策略**：預設 `SubBg=none`（BordersStyle=1 外框+陰影，畫面乾淨）。淺色/複雜背景或需遮蓋原始字幕時用 `SubBg=black`
-11. **Whisper 雙語工作流**：先以 `--language zh --task transcribe` 產生中文，再以 `--language zh --task translate` 產生英文翻譯，再用 `generate_bilingual_ass.py` 合併
+11. **雙語工作流**：Whisper 只做中文轉錄；目前 Agent 直接翻譯 cue 文字、保留時間碼並通過 `validate_agent_translation.py`，再用 `generate_bilingual_ass.py` 合併
 
 ## Common Issues
 
