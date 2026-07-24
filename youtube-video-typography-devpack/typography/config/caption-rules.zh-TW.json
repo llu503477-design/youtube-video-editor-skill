@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0",
+  "canvas": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30
+  },
+  "caption": {
+    "maxLines": 2,
+    "preferredLines": 1,
+    "maxWidthPercent": 84,
+    "positionYPercent": 72,
+    "minimumBottomMarginPercent": 12,
+    "preferredChineseCharsPerLine": [
+      8,
+      14
+    ],
+    "maximumChineseCharsPerLine": 18,
+    "fontSize": {
+      "normal": [
+        54,
+        68
+      ],
+      "emphasized": [
+        70,
+        92
+      ]
+    },
+    "minimumDurationMs": 650,
+    "maximumDurationMs": 3200
+  },
+  "safeZones": {
+    "topPercent": 8,
+    "bottomPercent": 12,
+    "leftPercent": 6,
+    "rightPercent": 6
+  }
+}

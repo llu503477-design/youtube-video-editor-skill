@@ -1,3 +1,27 @@
+## 2026-07-24 — Dynamic Typography Subproject Integration
+
+### Added
+- Root routing wrappers:
+  - `scripts/typography.ps1`（子專案命令轉接）
+  - `scripts/check-typography-dependencies.ps1`（轉接 typography 依賴檢查）
+- `tests/test_typography.py`（聚合子專案單元測試）
+- `tests/test_typography_integration.py`（主線路由、manifest、output refuse-overwrite、5 秒 MVP 煙霧測試）
+- Root `agents/openai.yaml` 的能力描述補上 dynamic typography。
+- README/SKILL 加入動態字幕指引。
+
+### Changed
+- `scripts/check-dependencies.ps1` 新增 Node/npm 檢查，並在基礎檢查完成後呼叫 typography dependency checker。
+- Root docs 與測試文件更新為可執行的 typography 主流程。
+
+### Verified
+- 根路由命令與子專案 `manifest.json` 已驗證。
+- `python -m unittest tests.test_typography -v`、`python tests/test_skill_scripts.py -v`、`pwsh -File scripts/check-dependencies.ps1` 已實際執行。
+- FFmpeg/FFprobe 5 秒 `typography` MVP smoke 已執行。
+- Remotion 已固定相依版本並提交 lockfile；`npm test`（2 tests）、
+  `npm run typecheck`、390-frame CLI render 與五張 1080×1920 畫面抽查皆已通過。
+- Remotion demo 改由交易式 PowerShell wrapper 發布，預設拒絕覆寫；
+  TypeScript 測試改用 Node 20 相容的 `tsx`。
+- 逐詞 karaoke、人臉避讓、貼紙／粒子與自動修復仍保留在 P1／P2。
 # CHANGE_LOG — YouTube Video Editor Skill
 
 ## 2026-07-24 — Qwen Narration with Whisper and Agent Translation
@@ -130,7 +154,6 @@
 | ai-subtitles/ffmpeg8-whisper.md | Updated force_style example with Noto Sans TC and new sizes |
 | auto-editing/silence-removal.md | Updated force_style example |
 | CHANGE_LOG.md | This entry |
-
 ## 2026-06-30 — v1.3: Narration Subs Timing, Bilingual Spacing Fix, YouTube Thumbnail
 
 ### Problem

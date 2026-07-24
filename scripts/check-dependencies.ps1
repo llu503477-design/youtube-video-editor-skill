@@ -7,7 +7,9 @@ $dependencies = @(
     @{ Name = "Auto-Editor"; Exe = "auto-editor"; Arguments = @("--version"); Pattern = "^\d+\.\d+\.\d+$"; Optional = $true },
     @{ Name = "yt-dlp"; Exe = "yt-dlp"; Arguments = @("--version"); Pattern = "\d"; Optional = $true },
     @{ Name = "whisper.cpp CLI"; Exe = "whisper-cli"; Arguments = @("--version"); Pattern = "whisper|version"; Optional = $true },
-    @{ Name = "qwentts.cpp CLI"; Exe = "qwen-tts"; Arguments = @("--help"); Pattern = "qwentts\.cpp|Usage:"; AllowedExitCodes = @(0, 1); Optional = $true },
+    @{ Name = "qwen-tts CLI"; Exe = "qwen-tts"; Arguments = @("--help"); Pattern = "qwen-tts|Usage:"; AllowedExitCodes = @(0, 1); Optional = $true },
+    @{ Name = "Node.js 20+"; Exe = "node"; Arguments = @("--version"); Pattern = "^v(?:2\d|[3-9]\d)\."; Optional = $true },
+    @{ Name = "npm"; Exe = "npm"; Arguments = @("--version"); Pattern = "^\d+\."; Optional = $true },
     @{ Name = "Python 3.8+"; Exe = "python"; Arguments = @("--version"); Pattern = "Python 3\.(?:[89]|[1-9]\d)"; Optional = $true }
 )
 
@@ -83,6 +85,23 @@ if ($missingOptional.Count -gt 0) {
         Write-Host "  - $tool" -ForegroundColor Yellow
     }
     Write-Host "Install only the tools needed for the requested workflow." -ForegroundColor Cyan
+}
+
+if ($requiredPassed) {
+    $typographyDeps = Join-Path $PSScriptRoot "check-typography-dependencies.ps1"
+    Write-Host ""
+    Write-Host "========================================"
+    Write-Host "Typography Extension Check"
+    Write-Host "========================================"
+    if (Test-Path -LiteralPath $typographyDeps -PathType Leaf) {
+        & $typographyDeps
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[FAILED] Typography extension dependencies" -ForegroundColor Red
+            $requiredPassed = $false
+        }
+    } else {
+        Write-Host "[ SKIP ] Typography extension checker not installed" -ForegroundColor Yellow
+    }
 }
 
 if ($requiredPassed) {

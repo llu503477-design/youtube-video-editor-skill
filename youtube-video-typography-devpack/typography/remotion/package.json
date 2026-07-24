@@ -1,0 +1,24 @@
+{
+  "name": "youtube-video-typography-remotion",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render:demo": "pwsh -NoLogo -NoProfile -File scripts/render-demo.ps1",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.499",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.499"
+  },
+  "devDependencies": {
+    "@types/react": "19.2.17",
+    "@types/react-dom": "19.2.3",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

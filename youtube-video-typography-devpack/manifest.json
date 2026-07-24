@@ -1,0 +1,12 @@
+{
+  "name": "youtube-video-typography-devpack",
+  "version": "0.1.0",
+  "targetRepository": "stevenke1981/youtube-video-editor-skill",
+  "integrationMode": "subproject",
+  "mvp": "ASS + FFmpeg",
+  "advancedRenderer": "Remotion demo renderer (install, tests, typecheck, and CLI render validated)",
+  "entryPrompt": "CODEX_SPARK_MASTER_PROMPT.md",
+  "rootEntrypoint": "../scripts/typography.ps1",
+  "rootDependencyCheck": "../scripts/check-typography-dependencies.ps1",
+  "safeByDefault": true
+}

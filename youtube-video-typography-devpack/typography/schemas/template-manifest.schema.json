@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Typography Template Registry",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "templates"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "templates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "purpose",
+          "strength",
+          "renderer"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "strength": {
+            "enum": [
+              "light",
+              "medium",
+              "strong"
+            ]
+          },
+          "renderer": {
+            "type": "array",
+            "items": {
+              "enum": [
+                "ass",
+                "remotion"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

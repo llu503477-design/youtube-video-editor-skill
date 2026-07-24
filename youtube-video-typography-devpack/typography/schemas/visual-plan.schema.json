@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/schemas/visual-plan.schema.json",
+  "title": "Video Typography Visual Plan",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "project",
+    "events"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": "1.0"
+    },
+    "project": {
+      "type": "object",
+      "required": [
+        "width",
+        "height",
+        "fps",
+        "duration",
+        "language"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "width": {
+          "type": "integer",
+          "minimum": 16
+        },
+        "height": {
+          "type": "integer",
+          "minimum": 16
+        },
+        "fps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "duration": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "language": {
+          "type": "string",
+          "minLength": 2
+        }
+      }
+    },
+    "brandId": {
+      "type": "string"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "start",
+          "end",
+          "text",
+          "purpose",
+          "emotion",
+          "intensity",
+          "keywords",
+          "templateId",
+          "strongEffect",
+          "readingPriority"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "start": {
+            "type": "number",
+            "minimum": 0
+          },
+          "end": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "purpose": {
+            "enum": [
+              "normal_dialogue",
+              "important_fact",
+              "number",
+              "warning",
+              "question",
+              "answer",
+              "punchline",
+              "chapter_title",
+              "quotation",
+              "call_to_action"
+            ]
+          },
+          "emotion": {
+            "type": "string"
+          },
+          "intensity": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "keywords": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "templateId": {
+            "type": "string"
+          },
+          "strongEffect": {
+            "type": "boolean"
+          },
+          "readingPriority": {
+            "enum": [
+              "low",
+              "normal",
+              "high"
+            ]
+          },
+          "words": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "text",
+                "start",
+                "end"
+              ],
+              "properties": {
+                "text": {
+                  "type": "string"
+                },
+                "start": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "end": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,4 +1,4 @@
 interface:
   display_name: "YouTube Video Editor"
-  short_description: "Auto-Editor、Qwen 旁白、Whisper 回聽與 Agent 翻譯"
-  default_prompt: "Use $youtube-video-editor to create authorized Qwen narration, transcribe it with Whisper, translate the SRT yourself without an API, and validate the video."
+  short_description: "Auto-Editor、Qwen 旁白、Whisper 回聽與 ASS 動態字卡"
+  default_prompt: "Use $youtube-video-editor to create dynamic typography from SRT with the validated ASS/FFmpeg subproject, process narration and Agent translation workflows, and validate the output."

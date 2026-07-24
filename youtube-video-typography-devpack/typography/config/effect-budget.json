@@ -1,0 +1,10 @@
+{
+  "schemaVersion": "1.0",
+  "windowSeconds": 10,
+  "strongEffects": 1,
+  "mediumEffects": 4,
+  "normalCaptionAnimatedWords": 1,
+  "importantCaptionAnimatedWords": 2,
+  "punchlineAnimatedWords": 4,
+  "fallbackTemplate": "clean-bottom"
+}

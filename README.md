@@ -210,3 +210,41 @@ python "$HOME\.codex\skills\.system\skill-creator\scripts\quick_validate.py" .
 
 本 repo 不提交語音模型、影片、音訊、轉錄輸出、CUDA runtime 或本機
 Codebase Memory 索引。安裝器會從官方來源下載模型並驗證 SHA-256。
+
+## 動態字幕與智慧字卡（Dynamic Typography）
+
+### 命令（不覆寫預設）
+
+```powershell
+pwsh -File scripts/typography.ps1 plan `
+  -InputPath captions.zh-TW.srt `
+  -OutputPath "output\demo.plan.json"
+
+pwsh -File scripts/typography.ps1 ass `
+  -InputPath "output\demo.plan.json" `
+  -OutputPath "output\demo.ass"
+
+pwsh -File scripts/typography.ps1 validate `
+  -InputPath "output\demo.plan.json" `
+  -OutputPath "output\demo.qa.json"
+
+pwsh -File scripts/typography.ps1 render `
+  -InputPath "input.mp4" `
+  -PlanPath "output\demo.plan.json" `
+  -AssPath "output\demo.ass" `
+  -OutputPath "output\demo.typography.mp4"
+```
+
+### 依賴檢查
+
+```powershell
+pwsh -File scripts/check-dependencies.ps1
+```
+
+此子流程會預設檢查 FFmpeg、FFprobe、qwen/whisper/auto-editor 並額外提供 typography 前置（FFmpeg ass/subtitles 檢查）。
+
+實作、契約、範例與測試保留在
+[`youtube-video-typography-devpack`](youtube-video-typography-devpack/) 子專案；root
+腳本只是薄路由。ASS + FFmpeg MVP 已驗收。Remotion demo renderer 亦已完成
+固定版本安裝、測試、typecheck、CLI render 與五張畫面抽查；逐詞 karaoke、
+人臉避讓、粒子／貼紙與自動修復仍是 P1／P2，不列為已交付能力。

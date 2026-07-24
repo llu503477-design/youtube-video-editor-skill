@@ -490,11 +490,11 @@ python scripts/thumbnail.py --video input.mp4 --time 10 --title "超強教學" -
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [Whisper.cpp](https://github.com/ggml-org/whisper.cpp)
 - [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
-- [Auto-Editor](https://github.com/WyattBlue/auto-editor)
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp)
 - [mcp-video](https://github.com/KyaniteLabs/mcp-video)
-- [FFmpeg 8.0 Whisper Filter](https://ffmpeg.org/ffmpeg-filters.html#whisper)
-- [FFmpeg Subtitles HowTo](https://trac.ffmpeg.org/wiki/HowToBurnSubtitlesIntoVideo)
-- [Helsinki-NLP/opus-mt-en-zh (MarianMT)](https://huggingface.co/Helsinki-NLP/opus-mt-en-zh)
-- [OpenCC (繁簡轉換)](https://github.com/BYVoid/OpenCC)
-- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- [Auto-Editor](https://github.com/WyattBlue/auto-editor)
+
+## 9. 動態字幕與字卡（Video Typography）
+
+- CapCut／Filmora 風格字幕、語意強調或字卡：讀取 [workflows/dynamic-typography.md](workflows/dynamic-typography.md)。
+- 使用自包含的 `youtube-video-typography-devpack` 子專案，依序執行 `plan` → `ass` → `validate` → `render`。
+- ASS + FFmpeg 是預設 renderer；Remotion demo renderer 已通過測試、typecheck、CLI render 與五張畫面抽查，但 P1／P2 高級功能仍未交付。所有輸出預設拒絕覆寫。

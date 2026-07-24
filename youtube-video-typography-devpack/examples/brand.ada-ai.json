@@ -1,0 +1,25 @@
+{
+  "schemaVersion": "1.0",
+  "id": "ada-ai",
+  "name": "阿達玩 AI",
+  "fonts": {
+    "caption": [
+      "Noto Sans TC",
+      "Microsoft JhengHei"
+    ],
+    "display": [
+      "Noto Sans TC",
+      "Microsoft JhengHei"
+    ]
+  },
+  "colors": {
+    "primary": "#FFD84D",
+    "secondary": "#7C5CFC",
+    "text": "#FFFFFF",
+    "dark": "#111111",
+    "warning": "#FF3B30",
+    "success": "#2ECC71"
+  },
+  "captionPreset": "clean-bottom",
+  "titlePreset": "impact-slam"
+}

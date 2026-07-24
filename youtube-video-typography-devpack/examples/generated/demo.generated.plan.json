@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "1.0",
+  "project": {
+    "width": 1080,
+    "height": 1920,
+    "fps": 30.0,
+    "duration": 13.0,
+    "language": "zh-TW"
+  },
+  "brandId": "default-zh-tw",
+  "events": [
+    {
+      "id": "caption-0001",
+      "start": 0.0,
+      "end": 1.6,
+      "text": "今天教你一個實用功能",
+      "purpose": "normal_dialogue",
+      "emotion": "neutral",
+      "intensity": 0.3,
+      "keywords": [],
+      "templateId": "clean-bottom",
+      "strongEffect": false,
+      "readingPriority": "normal"
+    },
+    {
+      "id": "caption-0002",
+      "start": 1.8,
+      "end": 3.3,
+      "text": "這個真的太誇張了！",
+      "purpose": "punchline",
+      "emotion": "surprised",
+      "intensity": 0.9,
+      "keywords": [
+        "太誇張"
+      ],
+      "templateId": "impact-slam",
+      "strongEffect": true,
+      "readingPriority": "high"
+    },
+    {
+      "id": "caption-0003",
+      "start": 3.5,
+      "end": 5.2,
+      "text": "只要 3 分鐘就能完成",
+      "purpose": "number",
+      "emotion": "informative",
+      "intensity": 0.72,
+      "keywords": [
+        "3"
+      ],
+      "templateId": "big-number",
+      "strongEffect": false,
+      "readingPriority": "high"
+    },
+    {
+      "id": "caption-0004",
+      "start": 5.4,
+      "end": 7.2,
+      "text": "千萬不要直接覆寫原始影片",
+      "purpose": "important_fact",
+      "emotion": "urgent",
+      "intensity": 0.65,
+      "keywords": [
+        "千萬"
+      ],
+      "templateId": "clean-bottom",
+      "strongEffect": false,
+      "readingPriority": "high"
+    },
+    {
+      "id": "caption-0005",
+      "start": 7.4,
+      "end": 9.0,
+      "text": "你知道原因嗎？",
+      "purpose": "question",
+      "emotion": "curious",
+      "intensity": 0.6,
+      "keywords": [],
+      "templateId": "question-pop",
+      "strongEffect": false,
+      "readingPriority": "normal"
+    },
+    {
+      "id": "caption-0006",
+      "start": 9.2,
+      "end": 11.0,
+      "text": "第一步，先建立視覺計畫",
+      "purpose": "chapter_title",
+      "emotion": "neutral",
+      "intensity": 0.62,
+      "keywords": [
+        "第一"
+      ],
+      "templateId": "chapter-title",
+      "strongEffect": false,
+      "readingPriority": "high"
+    },
+    {
+      "id": "caption-0007",
+      "start": 11.2,
+      "end": 13.0,
+      "text": "記得訂閱並留言告訴我",
+      "purpose": "call_to_action",
+      "emotion": "encouraging",
+      "intensity": 0.85,
+      "keywords": [
+        "訂閱"
+      ],
+      "templateId": "cta-card",
+      "strongEffect": true,
+      "readingPriority": "high"
+    }
+  ]
+}

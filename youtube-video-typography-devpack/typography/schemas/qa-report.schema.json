@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Typography QA Report",
+  "type": "object",
+  "required": [
+    "valid",
+    "errors",
+    "warnings",
+    "metrics"
+  ],
+  "properties": {
+    "valid": {
+      "type": "boolean"
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "required": [
+        "eventCount",
+        "strongEffectCount"
+      ],
+      "properties": {
+        "eventCount": {
+          "type": "integer"
+        },
+        "strongEffectCount": {
+          "type": "integer"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,95 @@
+{
+  "schemaVersion": "1.0",
+  "templates": [
+    {
+      "id": "clean-bottom",
+      "purpose": [
+        "normal_dialogue",
+        "important_fact"
+      ],
+      "strength": "light",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "question-pop",
+      "purpose": [
+        "question"
+      ],
+      "strength": "medium",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "impact-slam",
+      "purpose": [
+        "punchline",
+        "answer"
+      ],
+      "strength": "strong",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "warning-alert",
+      "purpose": [
+        "warning"
+      ],
+      "strength": "strong",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "big-number",
+      "purpose": [
+        "number"
+      ],
+      "strength": "medium",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "chapter-title",
+      "purpose": [
+        "chapter_title"
+      ],
+      "strength": "medium",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "quote-card",
+      "purpose": [
+        "quotation"
+      ],
+      "strength": "medium",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    },
+    {
+      "id": "cta-card",
+      "purpose": [
+        "call_to_action"
+      ],
+      "strength": "strong",
+      "renderer": [
+        "ass",
+        "remotion"
+      ]
+    }
+  ]
+}

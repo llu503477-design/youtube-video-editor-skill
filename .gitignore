@@ -31,6 +31,9 @@ work_*/
 *.srt
 *.ass
 *.vtt
+!youtube-video-typography-devpack/examples/demo.zh-TW.srt
+!youtube-video-typography-devpack/examples/generated/demo.generated.ass
+youtube-video-typography-devpack/examples/generated/smoke_ffprobe.json
 
 # Local configuration and secrets
 .env

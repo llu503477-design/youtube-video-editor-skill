@@ -1,0 +1,9 @@
+{
+  "valid": true,
+  "errors": [],
+  "warnings": [],
+  "metrics": {
+    "eventCount": 7,
+    "strongEffectCount": 2
+  }
+}
