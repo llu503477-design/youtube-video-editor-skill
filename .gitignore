@@ -1,0 +1,48 @@
+# Codex / local indexes
+.codebase-memory/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/
+
+# Models and local runtimes
+*.gguf
+*.bin
+models/
+build/
+dist/
+
+# Generated media and work directories
+output/
+outputs/
+artifacts/
+work_*/
+*.wav
+*.mp3
+*.m4a
+*.flac
+*.mp4
+*.mkv
+*.mov
+*.webm
+*.srt
+*.ass
+*.vtt
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+credentials*
+secrets*
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
