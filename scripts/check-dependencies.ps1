@@ -4,7 +4,7 @@ $ErrorActionPreference = "Stop"
 $dependencies = @(
     @{ Name = "FFmpeg"; Exe = "ffmpeg"; Arguments = @("-version"); Pattern = "ffmpeg version"; Optional = $false },
     @{ Name = "FFprobe"; Exe = "ffprobe"; Arguments = @("-version"); Pattern = "ffprobe version"; Optional = $false },
-    @{ Name = "Auto-Editor"; Exe = "auto-editor"; Arguments = @("--version"); Pattern = "auto-editor"; Optional = $true },
+    @{ Name = "Auto-Editor"; Exe = "auto-editor"; Arguments = @("--version"); Pattern = "^\d+\.\d+\.\d+$"; Optional = $true },
     @{ Name = "yt-dlp"; Exe = "yt-dlp"; Arguments = @("--version"); Pattern = "\d"; Optional = $true },
     @{ Name = "whisper.cpp CLI"; Exe = "whisper-cli"; Arguments = @("--version"); Pattern = "whisper|version"; Optional = $true },
     @{ Name = "qwentts.cpp CLI"; Exe = "qwen-tts"; Arguments = @("--help"); Pattern = "qwentts\.cpp|Usage:"; AllowedExitCodes = @(0, 1); Optional = $true },

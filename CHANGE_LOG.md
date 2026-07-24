@@ -1,5 +1,18 @@
 # CHANGE_LOG — YouTube Video Editor Skill
 
+## 2026-07-24 — Auto-Editor 31 Redesign
+
+### Added
+- **scripts/install-auto-editor.ps1** — Pins and verifies official Auto-Editor 31.3.2 Windows binaries, installs them on the current user's PATH, and preserves replaced runtimes as backups
+- **scripts/auto-edit.ps1 / auto-edit.cmd** — Preview-first wrapper with named pacing profiles, safe outputs, NLE export, custom expressions, and render validation
+- **tests/test_skill_scripts.py** — Auto-Editor wrapper argument, preview, output, and overwrite regression tests
+
+### Changed
+- **auto-editing/** — Replaced obsolete pip, `min-silence`, and `jumpcutter` guidance with the current Auto-Editor 31 CLI and a single preview-to-render workflow
+- **SKILL.md / README.md** — Added global installation, profile selection, prompt guidance, and timeline-ordering rules
+- **workflows/** — Full and batch pipelines now require a representative preview before approved rendering and fail closed instead of silently using unedited input
+- **scripts/check-dependencies.ps1 / validate.ps1** — Accept the version-only output used by current Auto-Editor releases
+
 ## 2026-06-30 — Initial Creation
 
 ### Added

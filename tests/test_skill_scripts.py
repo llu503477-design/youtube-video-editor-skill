@@ -329,6 +329,362 @@ class QwenVoiceCloneWrapperTests(unittest.TestCase):
             self.assertEqual(output.read_bytes(), b"keep")
 
 
+class AutoEditorWrapperTests(unittest.TestCase):
+    def setUp(self):
+        self.shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not self.shell:
+            self.skipTest("PowerShell is required")
+
+    def run_wrapper(self, *arguments, env=None):
+        return subprocess.run(
+            [
+                self.shell,
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                str(SCRIPTS / "auto-edit.ps1"),
+                *map(str, arguments),
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+            env=env,
+        )
+
+    def test_preview_uses_balanced_profile_without_rendering(self):
+        with tempfile.TemporaryDirectory(prefix="auto_editor_preview_") as temp:
+            work = Path(temp)
+            source = work / "input clip.mp4"
+            output = work / "edited.mp4"
+            log = work / "arguments.txt"
+            fake_cli = work / "fake-auto-editor.ps1"
+            source.write_bytes(b"video")
+            fake_cli.write_text(
+                """
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
+$Rest | Set-Content -LiteralPath $env:AUTO_EDITOR_TEST_LOG -Encoding UTF8
+if ($Rest -contains "--preview") {
+    Write-Output "preview complete"
+    exit 0
+}
+$outputIndex = [Array]::IndexOf($Rest, "-o")
+if ($outputIndex -ge 0) {
+    Set-Content -LiteralPath $Rest[$outputIndex + 1] -Value "rendered"
+}
+""".strip(),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["AUTO_EDITOR_TEST_LOG"] = str(log)
+
+            result = self.run_wrapper(
+                "-InputPath",
+                source,
+                "-OutputPath",
+                output,
+                "-Mode",
+                "Preview",
+                "-Profile",
+                "Balanced",
+                "-AutoEditorPath",
+                fake_cli,
+                env=env,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            arguments = log.read_text(encoding="utf-8-sig").splitlines()
+            self.assertIn("--preview", arguments)
+            self.assertIn("--edit", arguments)
+            self.assertIn("audio:-28dB", arguments)
+            self.assertIn("--margin", arguments)
+            self.assertIn("0.25sec,0.35sec", arguments)
+            self.assertIn("--smooth", arguments)
+            self.assertIn("0.25sec,0.10sec", arguments)
+            self.assertFalse(output.exists())
+
+    def test_render_refuses_overwrite_and_validates_output(self):
+        with tempfile.TemporaryDirectory(prefix="auto_editor_render_") as temp:
+            work = Path(temp)
+            source = work / "input.mp4"
+            output = work / "edited.mp4"
+            log = work / "arguments.txt"
+            fake_cli = work / "fake-auto-editor.ps1"
+            source.write_bytes(b"video")
+            output.write_bytes(b"keep")
+            fake_cli.write_text(
+                """
+param([Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest)
+$Rest | Set-Content -LiteralPath $env:AUTO_EDITOR_TEST_LOG -Encoding UTF8
+$outputIndex = [Array]::IndexOf($Rest, "-o")
+if ($outputIndex -lt 0) { exit 9 }
+Set-Content -LiteralPath $Rest[$outputIndex + 1] -Value "rendered"
+if ($env:AUTO_EDITOR_TEST_FAIL -eq "1") { exit 7 }
+""".strip(),
+                encoding="utf-8",
+            )
+            env = os.environ.copy()
+            env["AUTO_EDITOR_TEST_LOG"] = str(log)
+
+            blocked = self.run_wrapper(
+                "-InputPath",
+                source,
+                "-OutputPath",
+                output,
+                "-Mode",
+                "Render",
+                "-AutoEditorPath",
+                fake_cli,
+                env=env,
+            )
+            self.assertNotEqual(blocked.returncode, 0)
+            self.assertIn("Output already exists", blocked.stdout + blocked.stderr)
+            self.assertEqual(output.read_bytes(), b"keep")
+            self.assertFalse(log.exists())
+
+            dry_run = self.run_wrapper(
+                "-InputPath",
+                source,
+                "-OutputPath",
+                output,
+                "-Mode",
+                "Render",
+                "-AutoEditorPath",
+                fake_cli,
+                "-Force",
+                "-WhatIf",
+                env=env,
+            )
+            self.assertEqual(dry_run.returncode, 0, dry_run.stdout + dry_run.stderr)
+            self.assertEqual(output.read_bytes(), b"keep")
+            self.assertFalse(log.exists())
+            self.assertEqual(list(work.glob("edited.mp4.backup-*")), [])
+
+            env["AUTO_EDITOR_TEST_FAIL"] = "1"
+            failed = self.run_wrapper(
+                "-InputPath",
+                source,
+                "-OutputPath",
+                output,
+                "-Mode",
+                "Render",
+                "-AutoEditorPath",
+                fake_cli,
+                "-Force",
+                env=env,
+            )
+            self.assertNotEqual(failed.returncode, 0)
+            self.assertIn("failed with exit code 7", failed.stdout + failed.stderr)
+            self.assertEqual(output.read_bytes(), b"keep")
+            self.assertEqual(list(work.glob("edited.mp4.backup-*")), [])
+            self.assertEqual(len(list(work.glob(".edited.auto-editor-*.partial.mp4"))), 1)
+
+            env.pop("AUTO_EDITOR_TEST_FAIL")
+            rendered = self.run_wrapper(
+                "-InputPath",
+                source,
+                "-OutputPath",
+                output,
+                "-Mode",
+                "Render",
+                "-Profile",
+                "Conservative",
+                "-AutoEditorPath",
+                fake_cli,
+                "-Force",
+                env=env,
+            )
+            self.assertEqual(rendered.returncode, 0, rendered.stdout + rendered.stderr)
+            self.assertTrue(output.is_file())
+            self.assertGreater(output.stat().st_size, 0)
+            backups = list(work.glob("edited.mp4.backup-*"))
+            self.assertEqual(len(backups), 1)
+            self.assertEqual(backups[0].read_bytes(), b"keep")
+            arguments = log.read_text(encoding="utf-8-sig").splitlines()
+            self.assertIn("-o", arguments)
+            staging = arguments[arguments.index("-o") + 1]
+            self.assertRegex(
+                staging,
+                r"\.edited\.auto-editor-[0-9a-f]{32}\.partial\.mp4$",
+            )
+            self.assertIn("audio:-34dB", arguments)
+
+    def test_rejects_directory_output_and_wrong_export_extension(self):
+        with tempfile.TemporaryDirectory(prefix="auto_editor_output_contract_") as temp:
+            work = Path(temp)
+            source = work / "input.mp4"
+            output_directory = work / "existing-output.mp4"
+            fake_cli = work / "fake-auto-editor.ps1"
+            source.write_bytes(b"video")
+            output_directory.mkdir()
+            fake_cli.write_text("exit 0", encoding="utf-8")
+
+            directory_result = self.run_wrapper(
+                "-InputPath",
+                source,
+                "-OutputPath",
+                output_directory,
+                "-Mode",
+                "Render",
+                "-AutoEditorPath",
+                fake_cli,
+                "-Force",
+            )
+            self.assertNotEqual(directory_result.returncode, 0)
+            self.assertIn(
+                "OutputPath must be a file, not a directory",
+                directory_result.stdout + directory_result.stderr,
+            )
+            self.assertTrue(output_directory.is_dir())
+
+            extensions = {
+                "premiere": ".xml",
+                "premiere-otio": ".otio",
+                "resolve": ".fcpxml",
+                "final-cut-pro": ".fcpxml",
+                "shotcut": ".mlt",
+                "kdenlive": ".kdenlive",
+                "v3": ".v3",
+            }
+            for export_format, extension in extensions.items():
+                with self.subTest(export_format=export_format):
+                    result = self.run_wrapper(
+                        "-InputPath",
+                        source,
+                        "-OutputPath",
+                        work / f"{export_format}.wrong",
+                        "-Mode",
+                        "Export",
+                        "-ExportFormat",
+                        export_format,
+                        "-AutoEditorPath",
+                        fake_cli,
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn(
+                        f"requires an '{extension}' OutputPath",
+                        result.stdout + result.stderr,
+                    )
+
+
+class AutoEditorInstallerContractTests(unittest.TestCase):
+    def test_installer_pins_official_release_and_architecture_hashes(self):
+        installer = (SCRIPTS / "install-auto-editor.ps1").read_text(encoding="utf-8")
+        self.assertIn('$Version = "31.3.2"', installer)
+        self.assertIn(
+            "BA508838026D2878F598F6D6CECCEBFB113F9AC784ABD8B2F5F0A07B18BB5674",
+            installer,
+        )
+        self.assertIn(
+            "5A5DCA5CCD0A7AA8A3423A2F0590235CE70B8319A61EB75E74FDCE2EED6CCE58",
+            installer,
+        )
+        self.assertIn(
+            "https://github.com/WyattBlue/auto-editor/releases/download/",
+            installer,
+        )
+
+
+@unittest.skipUnless(
+    shutil.which("auto-editor") and shutil.which("ffmpeg") and shutil.which("ffprobe"),
+    "Auto-Editor and FFmpeg are required",
+)
+class AutoEditorIntegrationSmokeTests(unittest.TestCase):
+    def setUp(self):
+        self.shell = shutil.which("pwsh") or shutil.which("powershell")
+        if not self.shell:
+            self.skipTest("PowerShell is required")
+        version = subprocess.run(
+            ["auto-editor", "--version"],
+            text=True,
+            capture_output=True,
+            check=True,
+        ).stdout.strip()
+        if version != "31.3.2":
+            self.skipTest(f"Auto-Editor 31.3.2 required, found {version}")
+
+    def run_wrapper(self, *arguments):
+        return subprocess.run(
+            [
+                self.shell,
+                "-NoLogo",
+                "-NoProfile",
+                "-File",
+                str(SCRIPTS / "auto-edit.ps1"),
+                *map(str, arguments),
+            ],
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            capture_output=True,
+        )
+
+    def test_official_cli_preview_render_and_otio_export(self):
+        with tempfile.TemporaryDirectory(prefix="auto_editor_integration_") as temp:
+            work = Path(temp)
+            source = work / "source.mp4"
+            rendered = work / "rendered.mp4"
+            exported = work / "timeline.otio"
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=320x180:rate=24:duration=2",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "sine=frequency=440:sample_rate=48000:duration=2",
+                    "-shortest",
+                    "-c:v",
+                    "libx264",
+                    "-pix_fmt",
+                    "yuv420p",
+                    "-c:a",
+                    "aac",
+                    str(source),
+                ],
+                check=True,
+                capture_output=True,
+            )
+
+            commands = (
+                ["-InputPath", source, "-Mode", "Preview", "-NoCache"],
+                [
+                    "-InputPath",
+                    source,
+                    "-OutputPath",
+                    rendered,
+                    "-Mode",
+                    "Render",
+                    "-NoCache",
+                ],
+                [
+                    "-InputPath",
+                    source,
+                    "-OutputPath",
+                    exported,
+                    "-Mode",
+                    "Export",
+                    "-ExportFormat",
+                    "premiere-otio",
+                    "-NoCache",
+                ],
+            )
+            for arguments in commands:
+                result = self.run_wrapper(*arguments)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+            self.assertGreater(rendered.stat().st_size, 0)
+            self.assertGreater(exported.stat().st_size, 0)
+            self.assertIn('"OTIO_SCHEMA": "Timeline.1"', exported.read_text())
+
+
 @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "FFmpeg is required")
 class CapcutSmokeTests(unittest.TestCase):
     def setUp(self):

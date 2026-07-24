@@ -31,6 +31,9 @@ param(
     [ValidateSet('intro','full','summary')]
     [string]$NarrateMode = "intro",  # 旁白模式
     [switch]$SilenceRemove,      # 啟用靜音移除
+    [ValidateSet('Conservative','Balanced','Aggressive','Podcast','Motion','FastReview')]
+    [string]$AutoEditProfile = "Balanced",
+    [switch]$ApproveAutoEdit,     # 確認已先用代表性影片預覽 profile
     [int]$MaxConcurrent = 1      # 最大並行數（預設為序）
 )
 
@@ -55,6 +58,17 @@ if ($files.Count -eq 0) {
     exit 1
 }
 
+if ($SilenceRemove) {
+    $autoEditScript = Join-Path $PSScriptRoot "scripts\auto-edit.ps1"
+    if (-not (Test-Path -LiteralPath $autoEditScript -PathType Leaf)) {
+        throw "Auto-Editor wrapper not found: $autoEditScript"
+    }
+    & $autoEditScript -InputPath $files[0].FullName -Profile $AutoEditProfile -Mode Preview
+    if (-not $ApproveAutoEdit) {
+        throw "Review this representative preview, then rerun with -ApproveAutoEdit."
+    }
+}
+
 $processed = 0
 $failed = 0
 $logFile = Join-Path $OutputDir "batch_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').txt"
@@ -75,11 +89,12 @@ foreach ($file in $files) {
     if ($SilenceRemove) {
         $tempEdited = Join-Path $OutputDir "_temp_${baseName}.mp4"
         try {
-            auto-editor $currentInput --edit audio:threshold:-20dB --output $tempEdited
+            & $autoEditScript -InputPath $currentInput -OutputPath $tempEdited `
+                -Profile $AutoEditProfile -Mode Render
             $currentInput = $tempEdited
             Write-Host "  -> Silence removed"
         } catch {
-            Write-Host "  -> Auto-editor failed, using original" -ForegroundColor Yellow
+            throw "Auto-Editor failed for $($file.FullName): $($_.Exception.Message)"
         }
     }
 
@@ -246,8 +261,9 @@ Write-Host "Log file: $logFile"
 # 處理所有 MOV 檔案（含子目錄）
 .\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -FilePattern "*.mov" -Recurse
 
-# 加入 BGM + 靜音移除
+# 加入 BGM + 靜音移除（第一次不加 ApproveAutoEdit，只預覽代表性影片）
 .\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -BgmFile "D:\music\bgm.mp3" -SilenceRemove
+.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -BgmFile "D:\music\bgm.mp3" -SilenceRemove -ApproveAutoEdit
 
 # 使用 medium Whisper 模型
 .\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -WhisperModelPath $env:WHISPER_CPP_MODEL
@@ -259,7 +275,7 @@ Write-Host "Log file: $logFile"
 .\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -AssFormat
 
 # 完整處理：雙語 ASS + BGM + 靜音移除
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -AssFormat -BgmFile "D:\music\bgm.mp3" -SilenceRemove
+.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -AssFormat -BgmFile "D:\music\bgm.mp3" -SilenceRemove -ApproveAutoEdit
 
 # 無黑底字幕（乾淨風格統一外觀）
 .\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -SubBg none
@@ -274,7 +290,7 @@ Write-Host "Log file: $logFile"
 .\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -Narrate -NarrateLang en -NarrateVoice en-US-AriaNeural
 
 # 完整批次：雙語 + 旁白 + BGM + 靜音移除
-.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -Narrate -NarrateLang zh-TW -BgmFile "D:\music\bgm.mp3" -SilenceRemove
+.\batch-process.ps1 -InputDir "D:\raw" -OutputDir "D:\processed" -Bilingual -Narrate -NarrateLang zh-TW -BgmFile "D:\music\bgm.mp3" -SilenceRemove -ApproveAutoEdit
 ```
 
 ## Batch Processing Strategies

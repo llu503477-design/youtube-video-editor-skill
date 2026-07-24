@@ -1,160 +1,146 @@
-# Auto Editing — Silence Removal
+# Auto-Editor 31 — Safe Silence Removal
 
-## Overview
+## Design goals
 
-自動移除影片中的靜音段落是提升影片節奏感最有效的方式。本文件涵蓋兩種主要方法：
-1. **auto-editor**（推薦）：專用的自動影片剪輯工具，功能完整且維護活躍
-2. **純 FFmpeg silencedetect**：不需額外安裝，但操作較複雜
+Use the official Auto-Editor binary for analysis and rendering, but route normal skill usage
+through `scripts/auto-edit.ps1`. The wrapper provides:
 
-## Tool: auto-editor
+- preview-first operation;
+- named pacing profiles instead of fragile ad-hoc flags;
+- explicit output paths and overwrite protection;
+- recoverable timestamped backups when `-Force` is intentional;
+- output existence and non-empty validation;
+- NLE export without rendering intermediate media.
 
-### Installation
+Do not use the obsolete pip package or the old `min-silence` and `when:inactive` examples.
+Auto-Editor 30+ changed its CLI surface; verify commands against `auto-editor --help`.
 
-```powershell
-# Windows (winget)
-winget install auto-editor
-
-# macOS
-brew install auto-editor
-
-# Linux / Docker
-docker run wyattblue/auto-editor
-
-# Python pip
-pip install auto-editor
-```
-
-官網：https://auto-editor.com
-原始碼：https://github.com/WyattBlue/auto-editor
-
-### Basic Usage
+## Install globally on Windows
 
 ```powershell
-# 最基本用法：移除靜音段落
-auto-editor input.mp4 --output output.mp4
-
-# 自訂靜音閾值（預設 -20dB）
-auto-editor input.mp4 --edit audio:threshold:-30dB --output output.mp4
-
-# 自訂最小靜音長度（預設 2 秒）
-auto-editor input.mp4 --edit audio:min-silence:1.5 --output output.mp4
+pwsh -File scripts/install-auto-editor.ps1
+auto-editor --version
+auto-edit -?
 ```
 
-### Advanced Options
+The installer pins the official `31.3.2` Windows binary, verifies the GitHub release
+SHA-256, installs it under `%LOCALAPPDATA%\auto-editor\bin`, adds that directory to the
+current user's PATH, sets `AUTO_EDITOR_EXE`, and installs the `auto-edit` wrapper.
+
+The upstream project recommends official release binaries and no longer publishes the CLI
+on pip. On macOS use Homebrew; on Linux use the official release binary.
+
+## Preview first
+
+The wrapper defaults to `Preview`, so the first command analyzes cuts without rendering:
 
 ```powershell
-# 混合模式：靜音移除 + 非靜音加速
-auto-editor input.mp4 --edit audio:threshold:-20dB --when:inactive speed:1.5 --output output.mp4
-
-# 輸出剪輯片段（而非完整影片）
-auto-editor input.mp4 --export clip-sequence --output clip_%03d.mp4
-
-# 匯出到 Adobe Premiere Pro
-auto-editor input.mp4 --export premiere --output project.xml
-
-# 匯出到 DaVinci Resolve
-auto-editor input.mp4 --export resolve --output project.xml
-
-# 匯出到 Final Cut Pro
-auto-editor input.mp4 --export final-cut-pro --output project.xml
-
-# 只輸出被剪掉的部分（反向操作）
-auto-editor input.mp4 --when-active cut --when-inactive nil --output removed.mp4
+auto-edit -InputPath input.mp4
+auto-edit -InputPath input.mp4 -Profile Conservative -Mode Preview
 ```
 
-### Silence Detection Parameters
+Read the reported input/output duration and number of cuts. If the reduction is unexpectedly
+large, lower the threshold by selecting a more conservative profile or passing a custom edit
+expression.
 
-| 參數 | 預設值 | 說明 |
-|------|--------|------|
-| `threshold` | -20dB | 靜音判定音量閾值 |
-| `min-silence` | 2.0s | 最短靜音長度（低於此不剪） |
-| `min-loud` | 0.1s | 最短非靜音長度（低於此不保留） |
-| `silence-speed` | 0 (cut) | 靜音段落播放速度（0=剪掉） |
-| `loud-speed` | 1.0 | 非靜音段落播放速度 |
+## Profiles
 
-### Workflow: Remove Silence + Add BGM + Subtitles
+| Profile | Edit expression | Margin | Smoothing | Intended use |
+|---|---|---|---|---|
+| `Conservative` | `audio:-34dB` | `0.35s,0.50s` | `0.40s,0.15s` | Interviews, tutorials, hesitant speech |
+| `Balanced` | `audio:-28dB` | `0.25s,0.35s` | `0.25s,0.10s` | Default talking-head footage |
+| `Aggressive` | `audio:-20dB` | `0.12s,0.18s` | `0.15s,0.08s` | Shorts and fast-paced delivery |
+| `Podcast` | `audio:-32dB` | `0.40s,0.60s` | `0.50s,0.20s` | Natural conversational pacing |
+| `Motion` | `motion:threshold=2%` | `0.20s,0.30s` | `0.25s,0.10s` | Silent screen or camera footage |
+| `FastReview` | `audio:-28dB` | `0.20s,0.25s` | `0.25s,0.10s` | Keep silence at 8× instead of cutting |
+
+The values are starting points, not universal truth. Background noise, microphone gain,
+speaking style, music, and room tone materially affect audio analysis.
+
+## Render
+
+After approving the preview:
 
 ```powershell
-# Step 1: 移除靜音
-auto-editor input.mp4 --edit audio:threshold:-20dB --output no_silence.mp4
-
-# Step 2: 加入 BGM
-ffmpeg -i no_silence.mp4 -i bgm.mp3 -filter_complex "[1:a]volume=0.3[bgm];[0:a][bgm]amix=inputs=2:duration=shortest:dropout_transition=2[aout]" -map 0:v -map "[aout]" -c:v copy -c:a aac output_temp.mp4
-
-# Step 3: 燒錄字幕
-ffmpeg -i output_temp.mp4 -vf "subtitles=captions.srt:force_style='FontName=Noto Sans TC,FontSize=22,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,Outline=2,Shadow=1,MarginV=50,BorderStyle=1'" -c:v libx264 -crf 23 -c:a copy final.mp4
-
-# 清理暫存
-Remove-Item no_silence.mp4, output_temp.mp4
+auto-edit -InputPath input.mp4 `
+  -OutputPath output/input-edited.mp4 `
+  -Profile Balanced `
+  -Mode Render
 ```
 
-## Alternative: Pure FFmpeg silencedetect
-
-當無法安裝 auto-editor 時，可使用 FFmpeg 內建的 `silencedetect` filter。
-
-### Step 1: 偵測靜音段落
+Optional controlled overrides:
 
 ```powershell
-ffmpeg -i input.mp4 -af silencedetect=n=-30dB:d=1 -f null - 2> silence_log.txt
+auto-edit -InputPath input.mp4 `
+  -OutputPath output/input-edited.mp4 `
+  -Mode Render `
+  -EditExpression "audio:-26dB" `
+  -Margin "0.30sec,0.45sec" `
+  -Smooth "0.25sec,0.10sec" `
+  -Transition "dissolve:0.12sec:1sec" `
+  -AudioNormalize ebu `
+  -Crf 21
 ```
 
-輸出範例：
-```
-[silencedetect @ ...] silence_start: 12.345
-[silencedetect @ ...] silence_end: 15.678 | silence_duration: 3.333
-```
+Do not pass `-Force` casually. When used, the wrapper moves the old output to a timestamped
+backup before rendering.
 
-### Step 2: 建立 filter 指令
-
-根據偵測結果建立 select filter：
-```powershell
-# 影片 filter（保留非靜音段落）
-select='between(t,0,12.345)+between(t,15.678,end)', setpts=N/FRAME_RATE/TB
-
-# 音訊 filter
-aselect='between(t,0,12.345)+between(t,15.678,end)', asetpts=N/SR/TB
-```
-
-### Step 3: 套用剪輯
+## Export to an NLE
 
 ```powershell
-ffmpeg -i input.mp4 -filter_script:v video_filter.txt -filter_script:a audio_filter.txt output.mp4
+auto-edit -InputPath input.mp4 `
+  -OutputPath output/input.otio `
+  -Mode Export `
+  -ExportFormat premiere-otio `
+  -Profile Balanced
 ```
 
-## Tool Comparison
+Supported wrapper exports are `premiere`, `premiere-otio`, `resolve`, `final-cut-pro`,
+`shotcut`, `kdenlive`, and `v3`. Import the result and inspect every cut before destructive
+timeline cleanup.
 
-| 特性 | auto-editor | FFmpeg silencedetect | jumpcutter |
-|------|------------|---------------------|------------|
-| 安裝難度 | 簡單 | 內建（無需安裝） | pip install |
-| 速度 | 快（原生 Nim） | 中等 | 慢（Python） |
-| 精準度 | 高 | 高 | 中等 |
-| 匯出到 NLE | ✅ Premiere/Resolve/FCP | ❌ | ❌ |
-| 批次處理 | ✅ | ❌（需腳本） | ✅ |
-| 門檻調整 | ✅ 多參數 | ✅ 基礎參數 | ✅ 基礎參數 |
-| 維護狀態 | 活躍（4.5k stars） | 內建於 FFmpeg | 較少更新（156 stars） |
+## Direct official CLI
 
-## Best Practices
+Use direct CLI only when the wrapper does not expose a required upstream feature:
 
-1. **閾值選擇**：
-   - 安靜環境錄音：-30dB ~ -20dB
-   - 背景雜音較多：-25dB ~ -15dB
-   - 音樂/ podcast：-35dB ~ -25dB
+```powershell
+# Preview
+auto-editor input.mp4 --edit audio:-28dB --margin 0.25sec,0.35sec `
+  --smooth 0.25sec,0.10sec --preview
 
-2. **最小靜音長度**：
-   - 教學影片：0.5s ~ 1.0s（保留思考暫停）
-   - 快速節奏內容：0.3s ~ 0.5s
-   - Podcast：0.8s ~ 1.5s
+# Render
+auto-editor input.mp4 --edit audio:-28dB --margin 0.25sec,0.35sec `
+  --smooth 0.25sec,0.10sec -o output.mp4
 
-3. **事前準備**：
-   - 先處理音訊（降噪、正規化）可提升偵測準確度
-   - 較長影片先分段處理再合併
+# Keep quiet sections at 8x
+auto-editor input.mp4 --edit audio:-28dB -w:0 speed:8 -o review.mp4
+```
+
+Pass arguments as an array from automation code. Do not concatenate untrusted paths into a
+shell string.
+
+## Pipeline ordering
+
+Run automatic editing before generating external subtitles, chapter timestamps, overlays,
+or time-coded annotations. Removing time changes the entire downstream timeline.
+
+Recommended order:
+
+1. inspect source with FFprobe;
+2. preview Auto-Editor;
+3. render or export and manually review cuts;
+4. transcribe the edited media with whisper.cpp;
+5. create subtitles, narration, BGM, and final encode;
+6. validate the final output.
 
 ## Verification
 
 ```powershell
-# 比較前後長度
-ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 input.mp4
-ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 output.mp4
-
-# 抽查剪輯點是否自然（建議手動檢查 3-5 處）
+ffprobe -v error -show_entries format=duration,size `
+  -of default=noprint_wrappers=1 input.mp4
+ffprobe -v error -show_entries format=duration,size `
+  -of default=noprint_wrappers=1 output/input-edited.mp4
 ```
+
+Listen around at least five cut boundaries. Verify that words, breaths needed for natural
+phrasing, intentional pauses, music tails, and visual demonstrations were not truncated.

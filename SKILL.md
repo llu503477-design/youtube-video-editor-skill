@@ -1,6 +1,6 @@
 ---
 name: youtube-video-editor
-description: 使用 FFmpeg、Whisper、qwentts.cpp、yt-dlp 與內附腳本完成 YouTube 或本機影片的剪裁、分割、合併、轉檔、壓縮、濾鏡、文字與浮水印、速度調整、縮圖、背景音樂混音、靜音移除、自動跳剪、語音轉字幕、Qwen3-TTS 授權語音複製、繁體中文與英文雙語 SRT/ASS、字幕燒錄、旁白及批次產線。當使用者要求影片剪輯、自動影片處理、YouTube 下載、字幕或 captions、Whisper transcription、voice cloning、聲音複製、BGM/音軌混合、CapCut-like CLI、FFmpeg 指令或 mcp-video 工作流程時使用。
+description: 使用 FFmpeg、Auto-Editor 31、Whisper、qwentts.cpp、yt-dlp 與內附腳本完成 YouTube 或本機影片的剪裁、分割、合併、轉檔、壓縮、濾鏡、文字與浮水印、速度調整、縮圖、背景音樂混音、preview-first 靜音移除、自動跳剪、語音轉字幕、Qwen3-TTS 授權語音複製、繁體中文與英文雙語 SRT/ASS、字幕燒錄、旁白及批次產線。當使用者要求影片剪輯、自動影片處理、Auto-Editor、YouTube 下載、字幕或 captions、Whisper transcription、voice cloning、聲音複製、BGM/音軌混合、CapCut-like CLI、FFmpeg 指令或 mcp-video 工作流程時使用。
 ---
 
 # YouTube Video Editor
@@ -28,12 +28,32 @@ description: 使用 FFmpeg、Whisper、qwentts.cpp、yt-dlp 與內附腳本完�
 - Windows 全域 whisper.cpp 安裝：執行 `scripts/install-whisper-cpp.ps1`；轉錄時優先執行 `scripts/whisper-cli.ps1`，它預設使用 multilingual `large-v3-turbo` 並支援影片自動抽取音訊。
 - Qwen3-TTS 語音複製：讀取 [ai-subtitles/qwentts-voice-cloning.md](ai-subtitles/qwentts-voice-cloning.md)；安裝執行 `scripts/install-qwentts-cpp.ps1`，合成優先使用全域 `qwen-voice-clone` 或 `scripts/qwen-voice-clone.ps1`。
 - 旁白與 Edge-TTS：讀取 [ai-subtitles/narration.md](ai-subtitles/narration.md)。
-- 靜音移除或跳剪：讀取 [auto-editing/silence-removal.md](auto-editing/silence-removal.md) 或 [auto-editing/jump-cut.md](auto-editing/jump-cut.md)。
+- 靜音移除或跳剪：先讀取 [auto-editing/silence-removal.md](auto-editing/silence-removal.md)；需要策略選擇時再讀取 [auto-editing/jump-cut.md](auto-editing/jump-cut.md)。Windows 安裝執行 `scripts/install-auto-editor.ps1`，一般操作優先使用全域 `auto-edit` 或 `scripts/auto-edit.ps1`，先 `Preview` 再 `Render`。
 - YouTube 下載：讀取 [youtube-download/yt-dlp.md](youtube-download/yt-dlp.md)，並遵守來源授權與平台規範。
 - 批次或完整產線：讀取 [workflows/batch-processing.md](workflows/batch-processing.md) 或 [workflows/full-pipeline.md](workflows/full-pipeline.md)。
 - 常用命令列剪輯：執行 `scripts/capcut.ps1`，並在需要時讀取 [workflows/capcut-cli.md](workflows/capcut-cli.md)。
 - MCP 編輯：只有使用者要求 MCP 時才讀取 [mcp-tools/mcp-video.md](mcp-tools/mcp-video.md)。
 - 縮圖：執行 `scripts/thumbnail.py`。
+
+## Auto-Editor 全域執行基線
+
+Windows 使用官方 Auto-Editor `31.3.2` binary，不使用已停止發布 CLI 的 pip。
+安裝器驗證 GitHub release SHA-256、安裝到 `%LOCALAPPDATA%\auto-editor\bin`、
+加入使用者 PATH，並設定 `AUTO_EDITOR_EXE`：
+```powershell
+pwsh -File scripts/install-auto-editor.ps1
+auto-editor --version
+auto-edit -?
+```
+一般任務先預覽；統計合理後才用相同 profile 輸出：
+```powershell
+auto-edit -InputPath input.mp4 -Profile Balanced -Mode Preview
+auto-edit -InputPath input.mp4 -OutputPath output/edited.mp4 `
+  -Profile Balanced -Mode Render
+```
+wrapper 預設拒絕覆寫；明確使用 `-Force` 時會先把既有輸出移到時間戳備份。
+自動剪輯會改變時間軸，因此預設在 Whisper、外部字幕、章節、旁白與 overlay
+之前執行。完成後至少抽查五個剪輯點。
 
 ## whisper.cpp 全域執行基線
 
@@ -171,8 +191,7 @@ mcp-video 提供 80+ 結構化影片編輯工具，讓 AI Agent 能透過自然�
 | **字幕生成** | OpenAI Whisper | AI 語音轉文字 | Python (pip) |
 | **字幕生成** | whisper.cpp | 高效能 C++ 語音辨識 | Windows/macOS/Linux |
 | **字幕生成** | faster-whisper | 4x 加速 Whisper 推論 | Python (pip) |
-| **自動剪輯** | auto-editor | 自動靜音偵測與剪輯 | Windows/macOS/Linux |
-| **自動跳剪** | jumpcutter | Python 自動跳剪 | Python (pip) |
+| **自動剪輯** | Auto-Editor 31 official binary + `auto-edit` | 預覽、靜音/動態分析、跳剪與 NLE 匯出 | Windows/macOS/Linux |
 | **影片下載** | yt-dlp | YouTube 及 1000+ 網站下載 | Windows/macOS/Linux |
 | **MCP 工具** | mcp-video | 80+ 結構化影片編輯 MCP 工具 | Python 3.11+ |
 | **音訊處理** | FFmpeg amix | 多軌音訊混合 | 內建於 FFmpeg |
@@ -199,8 +218,8 @@ mcp-video 提供 80+ 結構化影片編輯工具，讓 AI Agent 能透過自然�
                          ▼
 ┌─────────────────────────────────────────────────────────┐
 │              Auto Editing (Optional)                     │
-│  auto-editor: silence detection → jump cuts              │
-│  jumpcutter: Python-based silence/voice detection        │
+│  auto-edit: preview → profile → render / NLE export      │
+│  audio, motion, subtitle or boolean-composed analysis     │
 └────────────────────────┬────────────────────────────────┘
                          ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -294,7 +313,9 @@ ffmpeg -i input.mp4 -i bgm.mp3 -filter_complex "[0:a][1:a]amix=inputs=2:duration
 
 ### Auto-Editor Silence Removal
 ```powershell
-auto-editor input.mp4 --edit audio:threshold:-20dB --output output.mp4
+# 先預覽統計，再以相同 profile 輸出
+auto-edit -InputPath input.mp4 -Profile Balanced -Mode Preview
+auto-edit -InputPath input.mp4 -OutputPath output.mp4 -Profile Balanced -Mode Render
 ```
 
 ### Generate Video Narration from Subtitles (TTS Voiceover)
@@ -394,6 +415,7 @@ python scripts/thumbnail.py --video input.mp4 --time 10 --title "超強教學" -
 
 ### Pre-flight Checks
 - [ ] FFmpeg 已安裝並在 PATH 中 (`ffmpeg -version`)
+- [ ] Auto-Editor 任務已確認 `auto-editor --version` 與 `auto-edit -?`
 - [ ] whisper.cpp 已安裝並在 PATH 中 (`whisper-cli --version`)
 - [ ] `WHISPER_CPP_MODEL` 指向可讀取的 `ggml-large-v3-turbo.bin`
 - [ ] 語音複製任務已確認授權，且 `qwen-tts --help`、模型與 codec 均可用
@@ -405,6 +427,7 @@ python scripts/thumbnail.py --video input.mp4 --time 10 --title "超強教學" -
 
 ### Post-flight Verification
 - [ ] 輸出檔案存在且大小合理
+- [ ] Auto-Editor 已先 Preview，且人工抽查至少五個剪輯點
 - [ ] whisper.cpp 結束碼為 0，且實際建立要求的 SRT/VTT/TXT/JSON
 - [ ] CUDA 任務日誌出現 `loaded CUDA backend`；失敗時明確改用 `-Cpu`
 - [ ] Qwen3-TTS 輸出是可解碼的 24 kHz mono WAV，並已實際聆聽抽查

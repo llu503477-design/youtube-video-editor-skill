@@ -1,7 +1,7 @@
 # YouTube Video Editor Skill
 
-給 OpenAI Codex Desktop／CLI 使用的影片編輯技能。整合 FFmpeg、whisper.cpp、
-qwentts.cpp、yt-dlp 與 PowerShell／Python wrapper，可完成剪輯、雙語字幕、
+給 OpenAI Codex Desktop／CLI 使用的影片編輯技能。整合 FFmpeg、Auto-Editor、
+whisper.cpp、qwentts.cpp、yt-dlp 與 PowerShell／Python wrapper，可完成剪輯、雙語字幕、
 字幕燒錄、背景音樂、旁白、授權語音複製、縮圖與批次處理。
 
 > English: A Codex skill for reproducible video editing, multilingual subtitles,
@@ -96,7 +96,7 @@ Desktop／CLI，請附上輸入檔及需求，或把本 repo 的 `SKILL.md` 和�
 
 ```text
 使用 $youtube-video-editor 處理 D:\raw\episode.mp4：
-1. 移除超過 0.8 秒的無聲片段。
+1. 使用 Auto-Editor Balanced profile 預覽剪輯比例，確認後移除無聲片段。
 2. 產生繁中與英文雙語 ASS。
 3. 將 D:\assets\bgm.mp3 以不蓋過人聲的音量混入。
 4. 輸出 H.264 MP4 到 D:\output\episode-final.mp4。
@@ -117,6 +117,22 @@ Desktop／CLI，請附上輸入檔及需求，或把本 repo 的 `SKILL.md` 和�
 
 ```powershell
 pwsh -File scripts/check-dependencies.ps1
+```
+
+安裝官方 Auto-Editor 31 binary 與安全 wrapper：
+
+```powershell
+pwsh -File scripts/install-auto-editor.ps1
+```
+
+先預覽剪輯統計，再渲染：
+
+```powershell
+auto-edit -InputPath input.mp4 -Profile Balanced -Mode Preview
+auto-edit -InputPath input.mp4 `
+  -OutputPath output/input-edited.mp4 `
+  -Profile Balanced `
+  -Mode Render
 ```
 
 安裝 whisper.cpp 與 multilingual `large-v3-turbo`：
@@ -155,6 +171,8 @@ pwsh -File scripts/qwen-voice-clone.ps1 `
 - [技能入口與品質規則](SKILL.md)
 - [whisper.cpp 字幕產線](ai-subtitles/whisper-pipeline.md)
 - [Qwen3-TTS 語音複製](ai-subtitles/qwentts-voice-cloning.md)
+- [Auto-Editor 安全靜音移除](auto-editing/silence-removal.md)
+- [Auto-Editor 跳剪策略](auto-editing/jump-cut.md)
 - [FFmpeg 基本剪輯](ffmpeg-core/basic-editing.md)
 - [字幕與雙語 ASS](ffmpeg-core/subtitles.md)
 - [完整產線](workflows/full-pipeline.md)

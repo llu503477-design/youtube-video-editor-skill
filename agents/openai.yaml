@@ -1,4 +1,4 @@
 interface:
   display_name: "YouTube Video Editor"
-  short_description: "自動剪輯、雙語字幕、Qwen 語音複製、旁白與 FFmpeg 影片產線"
-  default_prompt: "Use $youtube-video-editor to edit this video and verify the rendered output."
+  short_description: "Auto-Editor、FFmpeg、字幕、語音複製與影片自動產線"
+  default_prompt: "Use $youtube-video-editor to preview automatic cuts, render safely, and verify the edited video."

@@ -82,7 +82,7 @@ Write-Host ""
 Write-Host "--- Environment Checks ---"
 $hasFfmpeg = Test-Executable -Name "ffmpeg" -Arguments @("-version") -ExpectedPattern "ffmpeg version"
 $hasFfprobe = Test-Executable -Name "ffprobe" -Arguments @("-version") -ExpectedPattern "ffprobe version"
-$null = Test-Executable -Name "auto-editor" -Arguments @("--version") -ExpectedPattern "auto-editor" -Optional
+$null = Test-Executable -Name "auto-editor" -Arguments @("--version") -ExpectedPattern "^\d+\.\d+\.\d+$" -Optional
 
 if ($VideoPath) {
     Write-Host ""

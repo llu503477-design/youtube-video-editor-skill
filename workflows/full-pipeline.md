@@ -65,6 +65,9 @@ param(
     [string]$NarrateMode = "intro",  # Narration mode
     [string]$NarrateScript,   # Custom narration script (optional, overrides auto-generation)
     [switch]$SkipAutoEdit,
+    [ValidateSet('Conservative','Balanced','Aggressive','Podcast','Motion','FastReview')]
+    [string]$AutoEditProfile = "Balanced",
+    [switch]$ApproveAutoEdit, # Required to render after preview
     [switch]$IsYouTubeUrl
 )
 
@@ -121,19 +124,17 @@ Copy-Item $rawVideo $trimmedVideo
 # ── Stage 3: Auto Editing ──
 Write-Host "`n[Stage 3/7] Auto editing (silence removal)..." -ForegroundColor Cyan
 if (-not $SkipAutoEdit) {
-    # Check if auto-editor is available
-    $hasAutoEditor = & auto-editor --version 2>&1 | Select-String "auto-editor"
-    if ($hasAutoEditor) {
-        Write-Host "Using auto-editor..."
-        auto-editor $trimmedVideo --edit audio:threshold:-20dB --output $editedVideo
-    } else {
-        Write-Host "auto-editor not found. Using FFmpeg silencedetect..."
-        # FFmpeg-based silence detection
-        & ffmpeg -i $trimmedVideo -af silencedetect=n=-25dB:d=0.8 -f null - 2> (Join-Path $workDir "silence.log")
-        # (簡化版本：直接複製，實際需根據偵測結果建立 filter 指令)
-        Copy-Item $trimmedVideo $editedVideo
-        Write-Host "WARNING: FFmpeg silence removal is a placeholder. Install auto-editor for full functionality." -ForegroundColor Yellow
+    $autoEditScript = Join-Path $PSScriptRoot "scripts\auto-edit.ps1"
+    if (-not (Test-Path -LiteralPath $autoEditScript -PathType Leaf)) {
+        throw "Auto-Editor wrapper not found: $autoEditScript"
     }
+
+    & $autoEditScript -InputPath $trimmedVideo -Profile $AutoEditProfile -Mode Preview
+    if (-not $ApproveAutoEdit) {
+        throw "Auto-Editor preview completed. Review the statistics, then rerun with -ApproveAutoEdit."
+    }
+    & $autoEditScript -InputPath $trimmedVideo -OutputPath $editedVideo `
+        -Profile $AutoEditProfile -Mode Render
 } else {
     Copy-Item $trimmedVideo $editedVideo
     Write-Host "Auto-editing skipped."
@@ -358,47 +359,48 @@ if (Test-Path $finalVideo) {
 ### Usage
 
 ```powershell
-# 基本用法（本地檔案）
+# 基本用法（第一次只跑到 Auto-Editor 預覽；確認後再核准）
 .\full-pipeline.ps1 -InputVideo "D:\videos\raw.mp4"
+.\full-pipeline.ps1 -InputVideo "D:\videos\raw.mp4" -ApproveAutoEdit
 
 # 加入 BGM
-.\full-pipeline.ps1 -InputVideo "D:\videos\raw.mp4" -BgmFile "D:\music\bgm.mp3"
+.\full-pipeline.ps1 -InputVideo "D:\videos\raw.mp4" -BgmFile "D:\music\bgm.mp3" -ApproveAutoEdit
 
 # 從 YouTube 下載並處理
-.\full-pipeline.ps1 -InputVideo "https://youtube.com/watch?v=xxx" -IsYouTubeUrl
+.\full-pipeline.ps1 -InputVideo "https://youtube.com/watch?v=xxx" -IsYouTubeUrl -ApproveAutoEdit
 
 # 跳過自動剪輯
 .\full-pipeline.ps1 -InputVideo "raw.mp4" -SkipAutoEdit
 
 # 指定 Whisper 模型和輸出目錄
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -WhisperModelPath $env:WHISPER_CPP_MODEL -OutputDir "D:\output"
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -WhisperModelPath $env:WHISPER_CPP_MODEL -OutputDir "D:\output" -ApproveAutoEdit
 
 # 雙語字幕模式（zh-TW + EN 合併 SRT，統一風格）
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -ApproveAutoEdit
 
 # 雙語字幕 + ASS 格式（自動偵測解析度，動態字級縮放）
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -AssFormat
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -AssFormat -ApproveAutoEdit
 
 # 無黑底字幕（乾淨風格，透明背景）
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -SubBg none
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -SubBg none -ApproveAutoEdit
 
 # 黑底字幕（僅包覆文字，非全螢幕寬，預設）
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -SubBg black
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -SubBg black -ApproveAutoEdit
 
 # 從 YouTube 下載 + 雙語字幕 + BGM
-.\full-pipeline.ps1 -InputVideo "https://youtube.com/watch?v=xxx" -IsYouTubeUrl -Bilingual -AssFormat -BgmFile "D:\music\bgm.mp3"
+.\full-pipeline.ps1 -InputVideo "https://youtube.com/watch?v=xxx" -IsYouTubeUrl -Bilingual -AssFormat -BgmFile "D:\music\bgm.mp3" -ApproveAutoEdit
 
 # 加入旁白（繁體中文，階段性介紹）
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -Narrate
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -Narrate -ApproveAutoEdit
 
 # 旁白 + 自訂語言 + 指定發音人
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -Narrate -NarrateLang en -NarrateVoice en-US-AriaNeural
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -Narrate -NarrateLang en -NarrateVoice en-US-AriaNeural -ApproveAutoEdit
 
 # 自訂旁白稿
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Narrate -NarrateScript "D:\scripts\narration.txt"
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Narrate -NarrateScript "D:\scripts\narration.txt" -ApproveAutoEdit
 
 # 完整功能：雙語字幕 + 黑底 + 旁白 + BGM
-.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -AssFormat -SubBg black -Narrate -NarrateLang zh-TW -BgmFile "D:\music\bgm.mp3"
+.\full-pipeline.ps1 -InputVideo "raw.mp4" -Bilingual -AssFormat -SubBg black -Narrate -NarrateLang zh-TW -BgmFile "D:\music\bgm.mp3" -ApproveAutoEdit
 ```
 
 ## Pipeline Verification
@@ -434,7 +436,7 @@ Write-Host "  Output: $((ffprobe -v error -show_entries format=duration -of defa
 | 問題 | 可能原因 | 解決方案 |
 |------|---------|---------|
 | 產線中途失敗 | 檔案不存在 | 檢查路徑和權限 |
-| 字幕時間軸偏移 | Silence removal 改變了時間軸 | 先燒錄字幕再自動編輯，或使用 auto-editor 的 subtitle-aware 模式 |
+| 字幕時間軸偏移 | Silence removal 改變了時間軸 | 先完成自動剪輯再產生交付字幕；既有字幕需重新產生或依新時間軸 retime |
 | 雙語字幕錯位 | 中文與英文時間軸不一致 | 先以中文時間軸為主，使用腳本對齊；檢查 Whisper 的 zh/en 輸出 |
 | 中文顯示方塊 | 缺少 CJK 字型 | 安裝 Noto Sans TC 字型（Google Fonts，開源免費可商用） |
 | ASS 中文/英文大小不變 | ASS 樣式名稱錯誤或格式使用 SRT | 確認使用 `ass=` filter 而非 `subtitles=` |
